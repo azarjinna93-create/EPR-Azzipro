@@ -1,0 +1,20 @@
+# systemd service: runs Azzi Soft on the server, starts on boot, restarts if it stops.
+# Install: cp deploy/azzi.service /etc/systemd/system/ && systemctl enable --now azzi
+[Unit]
+Description=Azzi Soft ERP
+After=network.target
+
+[Service]
+User=azzi
+Group=azzi
+WorkingDirectory=/opt/azzi
+Environment=BILLING_HOST=127.0.0.1
+Environment=BILLING_PROXY=1
+# remove the next line while testing on plain http (IP address only), keep it once HTTPS is set up
+Environment=BILLING_HTTPS=1
+ExecStart=/opt/azzi/venv/bin/python app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

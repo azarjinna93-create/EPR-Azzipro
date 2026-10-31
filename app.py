@@ -20,6 +20,7 @@ import qrcode.image.svg
 from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template,
                    request, session, url_for)
 from markupsafe import Markup
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -119,6 +120,11 @@ if not os.path.exists(KEY_FILE):
 with open(KEY_FILE) as f:
     app.secret_key = f.read().strip()
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+if os.environ.get("BILLING_PROXY"):
+    # on a server behind nginx: take the user's IP address and http / https from its X-Forwarded-* headers
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+if os.environ.get("BILLING_HTTPS"):
+    app.config.update(SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
 
 # ---------------------------------------------------------------- database
