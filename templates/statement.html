@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Statement of Account · {{ party.name }}</h2>
+<p class="muted">{{ S.company_name }} — {{ kind|title }} account
+  {% if d_from or d_to %} · period {{ d_from|ddmmyyyy or 'start' }} to {{ d_to|ddmmyyyy or 'today' }}{% endif %}
+  {% if party.trn %}<br>TRN: <b>{{ party.trn }}</b>{% endif %}</p>
+
+<form class="filters" method="get">
+  <label class="inline-label">From <input type="date" name="from" value="{{ d_from }}"></label>
+  <label class="inline-label">To <input type="date" name="to" value="{{ d_to }}"></label>
+  <button class="btn">Show</button>
+  {% if d_from or d_to %}<a class="btn light" href="{{ url_for('statement', kind=kind, cid=party.id) }}">All dates</a>{% endif %}
+  <span class="spacer"></span>
+  {% if url_ok(url_for('payment_new', kind=pay_kind)) %}<a class="btn primary" href="{{ url_for('payment_new', kind=pay_kind, party=party.id) }}">+ {{ 'Receipt' if kind == 'customer' else 'Payment' }}</a>{% endif %}
+  <button type="button" class="btn" onclick="window.print()">🖨 Print</button>
+  <a class="btn light" href="{{ url_for('accounts', kind=kind) }}">← {{ kind|title }} Accounts</a>
+</form>
+
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Date</th><th>Type</th><th>Document</th><th>Reference</th><th class="r">Debit</th><th class="r">Credit</th>
+    <th class="r">Balance</th></tr></thead>
+  <tbody>
+    {% if d_from %}<tr><td>{{ d_from|ddmmyyyy }}</td><td colspan="5"><i>Opening balance</i></td><td class="r"><b>{{ opening|money }}</b></td></tr>{% endif %}
+  {% for l in lines %}
+    <tr>
+      <td class="nowrap">{{ l.date|ddmmyyyy }}</td>
+      <td><span class="tag {{ l.kind }}">{{ l.label }}</span></td>
+      <td><a href="{{ l.url }}"><b>{{ l.no }}</b></a></td>
+      <td class="small">{{ l.ref }}</td>
+      <td class="r">{{ l.debit|money if l.debit }}</td>
+      <td class="r">{{ l.credit|money if l.credit }}</td>
+      <td class="r"><b>{{ l.balance|money }}</b></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted center">No posted entries{{ ' in this period' if d_from or d_to }}.</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="4" class="r"><b>Closing balance {{ S.currency }}
+    ({{ 'receivable' if kind == 'customer' else 'payable' }})</b></td>
+    <td class="r">{{ lines|sum(attribute='debit')|money }}</td><td class="r">{{ lines|sum(attribute='credit')|money }}</td>
+    <td class="r"><b>{{ closing|money }}</b></td></tr></tfoot>
+</table>
+</div>
+<p class="muted small">{{ 'Debit = Tax Invoice (customer owes more); Credit = Credit Note or Receipt (customer owes less).' if kind == 'customer'
+  else 'Credit = Purchase Invoice (we owe the supplier more); Debit = Debit Note or Payment (we owe less).' }}</p>
+{% endblock %}

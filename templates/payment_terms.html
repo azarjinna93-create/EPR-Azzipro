@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Payment terms{% endblock %}
+{% block content %}
+<div class="fo-page">
+<div class="fo-crumb">Accounts receivable and payable <span>|</span> Setup</div>
+<div class="fo-title"><h1>Payment terms</h1></div>
+<p class="muted">The payment terms offered on sales and purchase orders, invoices and the Create order panels.
+  Days is the credit period (0 = paid on the spot, e.g. Cash or CDC; 60 for a 60-day PDC).
+  A term used on documents can't be deleted, only deactivated.</p>
+
+<div class="fo-listbox">
+  <div class="fo-gridwrap">
+  <table class="fo-grid">
+    <thead><tr><th>Payment term</th><th class="r">Days</th><th>Status</th><th class="r">Documents</th><th></th></tr></thead>
+    <tbody>
+    {% for t in rows %}
+      <tr>
+        <td><b>{{ t.name }}</b>{% if t.name == S.default_payment_terms %} <span class="status Submitted">Default for sales</span>{% endif %}</td>
+        <td class="r">{{ t.days }}</td>
+        <td>{% if t.active %}Active{% else %}<span class="status Draft">Inactive</span>{% endif %}</td>
+        <td class="r">{{ used.get(t.name, 0) }}</td>
+        <td class="nowrap r">{% if current_user.role == 'admin' %}
+          <a class="btn small light" href="{{ url_for('payment_terms_page', edit=t.id) }}">Edit</a>
+          {% if t.active and t.name != S.default_payment_terms %}
+          <form method="post" class="inline"><input type="hidden" name="act" value="default"><input type="hidden" name="id" value="{{ t.id }}">
+            <button class="btn small light">Make default</button></form>{% endif %}
+          <form method="post" class="inline"><input type="hidden" name="act" value="toggle"><input type="hidden" name="id" value="{{ t.id }}">
+            <button class="btn small light">{{ 'Deactivate' if t.active else 'Activate' }}</button></form>
+          {% if not used.get(t.name) %}
+          <form method="post" class="inline" onsubmit="return confirm('Delete {{ t.name }}?')"><input type="hidden" name="act" value="delete">
+            <input type="hidden" name="id" value="{{ t.id }}"><button class="btn small danger">Delete</button></form>{% endif %}
+        {% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted center">No payment terms yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% if current_user.role == 'admin' %}
+<details class="fo-fast" open>
+  <summary>{{ 'Edit ' ~ edit.name if edit else 'Add payment term' }}</summary>
+  <form method="post" class="wf-form">
+    <input type="hidden" name="act" value="save"><input type="hidden" name="id" value="{{ edit.id if edit }}">
+    <div class="row">
+      <label>Payment term *<input name="name" required value="{{ edit.name if edit }}" placeholder="e.g. 30 Days PDC"></label>
+      <label>Days *<input name="days" type="number" min="0" step="1" required value="{{ edit.days if edit else 0 }}"></label>
+    </div>
+    <button class="btn primary">{{ 'Update' if edit else 'Add payment term' }}</button>
+    {% if edit %}<a class="btn light" href="{{ url_for('payment_terms_page') }}">Cancel</a>{% endif %}
+  </form>
+</details>
+{% endif %}
+</div>
+{% endblock %}

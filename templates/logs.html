@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Admin Panel · Activity Log</h2>
+
+<div class="stats">
+  {% for s in summary %}
+  <a class="stat card" href="{{ url_for('admin_logs', user=s.username) }}">
+    <span>👤 {{ s.username }}</span><b>{{ s.n }}</b><small class="muted">last: {{ s.last }}</small></a>
+  {% endfor %}
+</div>
+
+<form class="filters" method="get">
+  <select name="user">
+    <option value="">All users</option>
+    {% for u in users %}<option {{ 'selected' if a.get('user') == u }}>{{ u }}</option>{% endfor %}
+  </select>
+  <select name="action">
+    <option value="">All actions</option>
+    {% for act in ['LOGIN', 'LOGOUT', 'CREATE', 'EDIT', 'SUBMIT', 'PRINT', 'DELETE', 'CUSTOMER', 'USER', 'SETTINGS'] %}
+      <option {{ 'selected' if a.get('action') == act }}>{{ act }}</option>{% endfor %}
+  </select>
+  <label class="inline-label">From <input type="date" name="from" value="{{ a.get('from', '') }}"></label>
+  <label class="inline-label">To <input type="date" name="to" value="{{ a.get('to', '') }}"></label>
+  <input name="q" value="{{ a.get('q', '') }}" placeholder="Search details / doc no.">
+  <button class="btn">Filter</button>
+  <a class="btn light" href="{{ url_for('admin_logs') }}">Reset</a>
+  <span class="spacer"></span>
+  <a class="btn" href="{{ url_for('admin_logs_csv', **a) }}">Export CSV</a>
+</form>
+
+<p class="muted small">Latest first, 100 per page.</p>
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Date / Time</th><th>User</th><th>Action</th><th>Details</th><th>IP</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><td class="nowrap">{{ r.created_at }}</td><td><b>{{ r.username }}</b></td>
+      <td><span class="tag act">{{ r.action }}</span></td><td>{{ r.details }}</td><td class="small">{{ r.ip }}</td></tr>
+  {% else %}
+    <tr><td colspan="5" class="muted center">No log entries.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endblock %}

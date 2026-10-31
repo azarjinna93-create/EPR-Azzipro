@@ -1,0 +1,330 @@
+{# Create / edit page for every document except the purchase invoice (which has its own page), laid out like the
+   Dynamics order pages: command bar, header fast tab, spreadsheet lines grid (movable / resizable columns), line details
+   and totals. Included by doc_form.html, which supplies the shared script: field names and element ids below are the
+   ones that script and the server expect. #}
+{% from "_terms.html" import term_options with context %}
+{% set t = doc_type %}
+{% set title = DOC_TYPES[t] %}
+{% set party_word = 'Vendor' if purchase else 'Customer' %}
+{% set dtype = d.discount_type if d and d.discount_type else 'amount' %}
+{% set wh_pick = t in ('SO', 'PO') and WAREHOUSES.values()|selectattr('active')|list|length > 1 %}
+{% set cur_wh = d.warehouse_id if d and d.warehouse_id else (None if wh_pick else default_wh) %}
+{% set open_hint = 'Returnable' if t in ('SR', 'PR') else ('Pending' if t in ('DN', 'GRN') else 'From') %}
+{% set final = t in ('INV', 'SR', 'PR') %}
+{% set list_url = url_for('documents', type=t) %}
+{% if t in ('SO', 'PO') %}{% set new_url = url_for('documents', type=t, new=1) %}
+{% elif t in ('INV',) %}{% set new_url = url_for('invoice_select', doc_type=t) %}
+{% elif t in ('SR', 'PR') %}{% set new_url = url_for('return_select', doc_type=t) %}
+{% else %}{% set new_url = url_for('documents', type=PREV_TYPE.get(t, t)) %}{% endif %}
+<form method="post" id="docForm" autocomplete="off" class="fo-page">
+  <input type="hidden" name="customer_id" id="customer_id" value="{{ d.customer_id if d and d.customer_id else '' }}">
+  {% if not doc %}{% for p in parents %}<input type="hidden" name="from" value="{{ p.id }}">{% endfor %}{% endif %}
+
+  <div class="fo-pane">
+    <div class="fo-cmdbar">
+      <a class="fo-cmd" href="{{ url_for('doc_view', doc_id=doc.id) if doc else list_url }}" title="Back">←</a>
+      {% if doc and doc.status == 'Submitted' %}
+      <button class="fo-cmd" name="after" value="save">💾 Save changes</button>
+      {% else %}
+      <button class="fo-cmd" name="after" value="draft">💾 Save</button>
+      {% endif %}
+      <a class="fo-cmd" href="{{ new_url }}">＋ New</a>
+      {% if doc and doc.status == 'Draft' and current_user.role == 'admin' %}
+      <button class="fo-cmd" formaction="{{ url_for('doc_delete', doc_id=doc.id) }}" formnovalidate
+              onclick="return confirm('Delete {{ doc.doc_no }}? This cannot be undone.')">🗑 Delete</button>
+      {% else %}<span class="fo-cmd off">🗑 Delete</span>{% endif %}
+      {% if not doc or doc.status == 'Draft' %}
+      <button class="fo-cmd" name="after" value="submit"
+        onclick="return confirm('{{ ('Submit this purchase order for approval?' if po_wf_on else 'Confirm this purchase order? It will be approved and locked for normal users.') if t == 'PO'
+                                   else ('Post this ' ~ title ~ '? A posted document cannot be changed.' if final else 'Submit this ' ~ title ~ '? After submission it is locked for normal users.') }}')">
+        ⟳ {{ ('Submit for approval' if po_wf_on else 'Confirm') if t == 'PO' else ('Post' if final else 'Submit') }}</button>
+      {% else %}<span class="fo-cmd off">⟳ {{ 'Post' if final else 'Submit' }}</span>{% endif %}
+      {% if priced %}<button type="button" class="fo-cmd" id="cmdTotals">Totals</button>{% endif %}
+      <span class="fo-sep"></span>
+      <span class="fo-tab on">{{ title }}</span>
+      <span class="spacer"></span>
+      <a class="fo-cmd" href="{{ url_for('doc_view', doc_id=doc.id) if doc else list_url }}">Cancel</a>
+    </div>
+  </div>
+
+  <div class="fo-crumb"><a href="{{ list_url }}">All {{ title|lower }}s</a> <span>|</span> Standard view</div>
+  <div class="fo-title">
+    <h1>{{ doc.doc_no if doc else preview_no }} : {% if pi_party and pi_party.account_no %}{{ pi_party.account_no }} - {% endif %}{{ (d.cust_name if d else '')|upper }}</h1>
+    {% if parents %}<div class="fo-state"><span>Created from</span><b>{% for p in parents %}<a href="{{ url_for('doc_view', doc_id=p.id) }}">{{ p.doc_no }}</a>{{ ', ' if not loop.last }}{% endfor %}</b></div>{% endif %}
+    <div class="fo-state"><span>Status</span><b>{{ ({'Submitted': 'Posted' if final else 'Confirmed', 'Pending': 'Pending approval'}.get(doc.status, doc.status)) if doc else 'New' }}</b></div>
+  </div>
+  {% if parent and t in ('SR', 'PR', 'DN', 'GRN') %}
+  <p class="muted small">{{ 'Only the quantity not yet returned is shown; Qty 0 skips a line.' if t in ('SR', 'PR')
+       else 'Only the quantity still pending is shown; change Qty for a part ' ~ ('receipt' if t == 'GRN' else 'delivery') ~ ', Qty 0 leaves a line for next time.' }}
+     {{ "A GRN can't receive more than is pending on the PO." if t == 'GRN' }}</p>
+  {% endif %}
+  <div class="fo-views">
+    <button type="button" class="fo-view on" data-view="lines">Lines</button>
+    <button type="button" class="fo-view" data-view="header">Header</button>
+  </div>
+
+  <section data-view="lines">
+    <details class="fo-fast" open>
+      <summary>{{ title }} header</summary>
+      <div class="fo-fields pi-fields">
+        <div class="fo-col">
+          <h5>Dates</h5>
+          <div class="fo-f"><label>{{ 'Order date' if t in ('SO', 'PO') else 'Date' }} *</label>
+            <input type="date" name="doc_date" value="{{ doc.doc_date if doc else today }}" required></div>
+          {% if t == 'PO' %}<div class="fo-f"><label>Requested receipt date</label>
+            <input type="date" name="receipt_date" value="{{ d.receipt_date if d and d.receipt_date }}"></div>{% endif %}
+          {% if priced %}
+          <h5 class="pi-h">Discounts</h5>
+          <div class="fo-f"><label>Total discount</label>
+            <span class="po-disc"><input name="discount_value" id="discount_value" type="number" step="any" min="0" class="n"
+                   value="{{ d.discount_value|num if d and d.discount_value else '' }}">
+              <select name="discount_type" id="discount_type">
+                <option value="amount" {{ 'selected' if dtype == 'amount' }} class="curCode">{{ cur }}</option>
+                <option value="percent" {{ 'selected' if dtype == 'percent' }}>%</option>
+              </select></span></div>
+          {% else %}
+          <input type="hidden" name="discount_value" value="{{ d.discount_value if d else 0 }}"><input type="hidden" name="discount_type" value="{{ dtype }}">
+          {% endif %}
+        </div>
+        <div class="fo-col">
+          <h5>{{ party_word }}</h5>
+          <div class="fo-f"><label>{{ party_word }} name</label><input name="cust_name" id="cust_name" required readonly value="{{ d.cust_name if d }}"></div>
+          <div class="fo-f"><label>Contact</label><input name="cust_contact" id="cust_contact" value="{{ d.cust_contact if d }}"></div>
+          <div class="fo-f"><label>Kind attention</label><input name="attention" id="attention" value="{{ d.attention if d }}"></div>
+        </div>
+        <div class="fo-col">
+          <h5>References</h5>
+          <div class="fo-f"><label>{{ 'Supplier reference' if purchase else 'Customer reference (LPO No)' }}</label><input name="lpo_no" value="{{ d.lpo_no if d }}"></div>
+          <div class="fo-f"><label>Payment terms{{ ' *' if t in TERMS_REQUIRED }}</label>
+            <select name="payment_terms" {{ 'required' if t in TERMS_REQUIRED }}>{{ term_options(d.payment_terms if d else ('' if purchase else S.default_payment_terms)) }}</select></div>
+          <div class="fo-f"><label>Mode of delivery</label><input name="dispatch_mode" value="{{ d.dispatch_mode if d else S.default_dispatch }}"></div>
+          {% if t == 'GRN' %}
+          <div class="fo-f"><label>Supplier DO No *</label><input name="supplier_do_no" required value="{{ doc.supplier_do_no if doc }}"></div>
+          <div class="fo-f"><label>Supplier DO date *</label><input type="date" name="supplier_do_date" required value="{{ doc.supplier_do_date if doc }}"></div>
+          {% endif %}
+        </div>
+        {% if t in ('SR', 'PR') %}
+        <div class="fo-col">
+          <h5>Return</h5>
+          {% if approval %}<div class="fo-f"><label>Approval</label><span class="ok-big">✓ Approved{{ ': ' ~ approval.admin_remark if approval.admin_remark }}</span></div>{% endif %}
+          <div class="fo-f"><label>Reason for return *</label><input name="notes" required value="{{ doc.notes if doc else (approval.reason if approval else '') }}"
+                 placeholder="damaged, wrong item…"></div>
+        </div>
+        {% endif %}
+        <div class="fo-col">
+          <h5>Storage dimensions</h5>
+          <div class="fo-f"><label>Warehouse *</label>
+            <select name="warehouse_id" id="warehouse_id" required>
+              {% if not cur_wh %}<option value="" selected>— select warehouse —</option>{% endif %}
+              {% for w in WAREHOUSES.values() if w.active or w.id == cur_wh %}
+              <option value="{{ w.id }}" {{ 'selected' if w.id == cur_wh }}>{{ w.code }} · {{ w.name }}</option>
+              {% endfor %}
+            </select></div>
+          <div class="fo-f"><label>Delivery location</label><input name="delivery_location" value="{{ d.delivery_location if d }}"></div>
+        </div>
+        <div class="fo-col">
+          <h5>Currency</h5>
+          {% if t == 'PO' %}
+          <div class="fo-f"><label>Currency</label>
+            <select name="currency" id="currency">{% for c in CURRENCIES.values() if c.active or c.code == cur %}
+              <option value="{{ c.code }}" data-rate="{{ '%g'|format(c.rate) }}" {{ 'selected' if c.code == cur }}>{{ c.code }} · {{ c.name }}</option>{% endfor %}
+            </select></div>
+          <div class="fo-f" id="xrBox" {{ 'hidden' if cur == BASE_CUR }}><label>Exchange rate ({{ BASE_CUR }} per 1 <span class="curCode">{{ cur }}</span>)</label>
+            <input name="exchange_rate" id="exchange_rate" type="number" step="any" min="0" value="{{ '%g'|format(d.exchange_rate) if d and d.exchange_rate else '1' }}"></div>
+          {% else %}
+          <div class="fo-f"><label>Currency</label><span>{{ cur }}{{ ' @ %g'|format(xr) if cur != BASE_CUR }}</span></div>
+          <input type="hidden" name="currency" value="{{ cur }}"><input type="hidden" name="exchange_rate" id="exchange_rate" value="{{ xr }}">
+          {% endif %}
+          {% if priced %}
+          <h5 class="pi-h">Sales tax</h5>
+          <div class="fo-f"><label>VAT %</label><input name="vat_rate" id="vat_rate" type="number" step="0.01" value="{{ d.vat_rate|num if d else S.vat_rate }}"></div>
+          {% else %}<input type="hidden" name="vat_rate" value="{{ d.vat_rate|num if d else S.vat_rate }}">{% endif %}
+        </div>
+        <div class="fo-col">
+          <h5>Administration</h5>
+          <div class="fo-f"><label>{{ 'Orderer' if t == 'PO' else ('Sales taker' if t == 'SO' else 'Prepared by') }}</label><span>{{ current_user.full_name or current_user.username }}</span></div>
+          {% if t == 'PO' %}<div class="fo-f"><label>Approval</label><span>{{ 'Approval workflow on' if po_wf_on else 'Approved on confirm' }}</span></div>{% endif %}
+        </div>
+      </div>
+    </details>
+
+    <div class="fo-fast pi-lines">
+      <div class="pi-lines-head">{{ title }} lines</div>
+      <div class="fo-gridbar">
+        <button type="button" class="fo-link" id="addRow">＋ Add line</button>
+        <button type="button" class="fo-link" id="removeRow">🗑 Remove</button>
+        <span class="muted">Type an item name to search products. Drag a column heading to move it, or its right edge to resize.</span>
+        <button type="button" class="fo-link" data-cols-reset="lines-{{ t }}">Reset columns</button>
+      </div>
+      <div class="fo-gridwrap">
+      <table class="fo-grid pi-grid sheet" id="items" data-cols="lines-{{ t }}">
+        <thead><tr>
+          <th class="sel"></th><th class="r" data-col="line">Line number</th><th data-col="code">Item number</th><th data-col="name">Product name</th>
+          <th data-col="text">Product text</th>
+          {% if parent %}<th class="r" data-col="open">{{ open_hint }}</th>{% endif %}
+          <th class="r" data-col="qty">Quantity</th><th data-col="unit">Unit</th><th data-col="wh">Warehouse</th>
+          {% if priced %}<th class="r" data-col="rate">Unit price</th><th class="r" data-col="disc">Discount</th>
+          <th class="r" data-col="dpct">Discount %</th><th class="r" data-col="amt">Net amount</th>{% endif %}
+        </tr></thead>
+        <tbody></tbody>
+        <tfoot><tr>
+          <td class="sel"></td><td data-col="line"></td><td data-col="code"></td>
+          <td data-col="name"><b>Total</b> <span class="muted small" id="lineCount"></span></td><td data-col="text"></td>
+          {% if parent %}<td data-col="open"></td>{% endif %}
+          <td class="r" data-col="qty"><b id="totQty">0</b></td><td data-col="unit"></td><td data-col="wh"></td>
+          {% if priced %}<td data-col="rate"></td><td data-col="disc"></td><td class="r" data-col="dpct"><b class="curCode">{{ cur }}</b></td>
+          <td class="r" data-col="amt"><b id="sub">0.00</b></td>{% endif %}
+        </tr></tfoot>
+      </table>
+      </div>
+    </div>
+
+    <details class="fo-fast" id="lineDetails" open>
+      <summary>Line details <span class="fo-sum" id="ldSum"></span></summary>
+      <div class="fo-fields pi-fields">
+        <div class="fo-col">
+          <h5>Line</h5>
+          <div class="fo-f"><label>Line number</label><span id="ldNo">-</span></div>
+          <div class="fo-f"><label>Item number</label><span id="ldCode">-</span></div>
+          <div class="fo-f"><label>Product name</label><span id="ldName">-</span></div>
+        </div>
+        <div class="fo-col po-ldtext">
+          <h5>Text</h5>
+          <div class="fo-f"><label>Product text (specification)</label><textarea id="ldText" rows="4" placeholder="Select a line"></textarea></div>
+        </div>
+        <div class="fo-col">
+          <h5>{{ 'Price and quantity' if priced else 'Quantity' }}</h5>
+          <div class="fo-f"><label>Quantity</label><span id="ldQty">-</span></div>
+          {% if priced %}
+          <div class="fo-f"><label>Unit price</label><span id="ldRate">-</span></div>
+          <div class="fo-f"><label>Discount / Discount %</label><span id="ldDisc">-</span></div>
+          <div class="fo-f"><label>Net amount</label><span id="ldAmt">-</span></div>
+          {% endif %}
+        </div>
+        <div class="fo-col">
+          <h5>Delivery</h5>
+          <div class="fo-f"><label>Warehouse</label><span id="ldWh">-</span></div>
+        </div>
+      </div>
+    </details>
+
+    {% if priced %}
+    <details class="fo-fast" id="totalsPane" open>
+      <summary>Totals</summary>
+      <table class="totals pi-totals">
+        <tr><td>Total Value</td><td class="r" id="sub2">0.00</td></tr>
+        <tr><td>Less Discount</td><td class="r" id="disc">0.00</td></tr>
+        <tr><td>Taxable Amount</td><td class="r" id="taxable">0.00</td></tr>
+        <tr><td>VAT <span id="vatPct"></span>%</td><td class="r" id="vat">0.00</td></tr>
+        <tr class="grand"><td>Grand Total <span class="curCode">{{ cur }}</span></td><td class="r" id="tot">0.00</td></tr>
+        <tr id="baseRow" {{ 'hidden' if cur == BASE_CUR }}><td>Total in {{ BASE_CUR }}</td><td class="r" id="baseTot">0.00</td></tr>
+      </table>
+    </details>
+    {% endif %}
+  </section>
+
+  <section data-view="header" hidden>
+    <details class="fo-fast" open>
+      <summary>{{ party_word }} address</summary>
+      <div class="fo-fields pi-fields">
+        <div class="fo-f"><label>{{ party_word }} account</label><span>{{ pi_party.account_no if pi_party and pi_party.account_no else 'One-time ' ~ ('supplier' if purchase else 'customer') }}</span></div>
+        <div class="fo-f"><label>Area</label><input name="cust_area" id="cust_area" value="{{ d.cust_area if d }}"></div>
+        <div class="fo-f"><label>P.O.Box</label><input name="cust_po_box" id="cust_po_box" value="{{ d.cust_po_box if d }}"></div>
+        <div class="fo-f"><label>TRN No</label><input name="cust_trn" id="cust_trn" value="{{ d.cust_trn if d }}"></div>
+        {% if purchase %}<input type="hidden" name="buyer" value="{{ d.buyer if d }}">
+        {% else %}<div class="fo-f"><label>Buyer (if not the consignee)</label><input name="buyer" value="{{ d.buyer if d else 'Same as above' }}"></div>{% endif %}
+      </div>
+    </details>
+    <details class="fo-fast" open>
+      <summary>Payment and description</summary>
+      <div class="fo-fields pi-fields">
+        <div class="fo-f"><label>Payment note</label><input name="payment_resp" value="{{ d.payment_resp if d else ('' if purchase else S.default_payment_resp) }}"></div>
+        <div class="fo-f"><label>Goods description</label><input name="goods_desc" value="{{ d.goods_desc if d }}"></div>
+      </div>
+    </details>
+  </section>
+</form>
+
+<template id="rowTpl">
+  <tr>
+    <td class="sel"><span class="radio"></span></td>
+    <td class="r sl" data-col="line"></td>
+    <td class="code" data-col="code"></td>
+    <td data-col="name"><input name="title" class="title" autocomplete="off" placeholder="Type to search products">
+        <input type="hidden" name="product_id"><input type="hidden" name="source_item_id">
+        {% if not priced %}<input type="hidden" name="rate"><input type="hidden" name="disc_pct"><input type="hidden" name="disc_amt">{% endif %}
+        {% if not parent %}<span class="pend" hidden></span>{% endif %}</td>
+    <td data-col="text"><input name="details" class="ptext" placeholder="Product text"></td>
+    {% if parent %}<td class="r open-q" data-col="open"><span class="pend"></span></td>{% endif %}
+    <td data-col="qty"><input name="qty" type="number" step="any" class="n"></td>
+    <td data-col="unit"><input name="unit" list="units" class="unit" value="Nos"></td>
+    <td data-col="wh"><select name="line_wh" class="lwh" aria-label="Warehouse">
+      {% for w in WAREHOUSES.values() %}<option value="{{ w.id }}" {{ 'disabled' if not w.active }}>{{ w.code }}</option>{% endfor %}
+    </select></td>
+    {% if priced %}
+    <td data-col="rate"><input name="rate" type="number" step="any" class="n"></td>
+    <td data-col="disc"><input name="disc_amt" type="number" step="any" min="0" class="n" placeholder="per unit"></td>
+    <td data-col="dpct"><input name="disc_pct" type="number" step="any" min="0" max="100" class="n" placeholder="%"></td>
+    <td class="r amt" data-col="amt">0.00</td>
+    {% endif %}
+  </tr>
+</template>
+<datalist id="units">{% for u in UNITS %}<option value="{{ u }}">{% endfor %}</datalist>
+<script>
+// Document page: selected line drives the Line details pane; its text box edits that line's product text
+const fmt2 = n => (+n || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+function selected() { return document.querySelector('#items tbody tr.on'); }
+function pickLine(tr) {
+  document.querySelectorAll('#items tbody tr').forEach(x => x.classList.toggle('on', x === tr));
+  showLine();
+}
+function showLine() {
+  const tr = selected(), v = n => { const el = tr && tr.querySelector(`[name=${n}]`); return el ? el.value : ''; };
+  const set = (id, x) => { const el = document.getElementById(id); if (el) el.textContent = x || '-'; };
+  set('ldNo', tr && tr.querySelector('.sl').textContent);
+  set('ldCode', tr && tr.querySelector('.code').textContent);
+  set('ldName', v('title'));
+  set('ldQty', tr && v('qty') ? (+v('qty')).toLocaleString('en-US') + ' ' + v('unit') : '');
+  set('ldRate', tr && v('rate') ? fmt2(v('rate')) : '');
+  set('ldDisc', tr && (+v('disc_amt') || +v('disc_pct')) ? [+v('disc_amt') ? fmt2(v('disc_amt')) + ' per unit' : '',
+                                                           +v('disc_pct') ? v('disc_pct') + '%' : ''].filter(Boolean).join(' · ') : '');
+  set('ldAmt', tr && tr.querySelector('.amt') && tr.querySelector('.amt').textContent);
+  const wh = tr && tr.querySelector('[name=line_wh]').selectedOptions[0];
+  set('ldWh', wh ? wh.text : '');
+  const t = document.getElementById('ldText');
+  if (document.activeElement !== t) t.value = v('details');
+  t.disabled = !tr;
+  document.getElementById('ldSum').textContent = tr ? `Line ${tr.querySelector('.sl').textContent} · ${v('title')}` : '';
+}
+window.onRowAdded = tr => setTimeout(() => { if (!selected()) pickLine(tr); });
+window.afterRecalc = () => {
+  const n = [...document.querySelectorAll('#items tbody [name=title]')].filter(i => i.value.trim()).length;
+  document.getElementById('lineCount').textContent = n + ' row' + (n === 1 ? '' : 's');
+  showLine();
+};
+document.getElementById('ldText').addEventListener('input', e => {
+  const tr = selected(); if (tr) tr.querySelector('[name=details]').value = e.target.value;
+});
+document.querySelector('#items tbody').addEventListener('click', e => { const tr = e.target.closest('tr'); if (tr) pickLine(tr); });
+document.querySelector('#items tbody').addEventListener('focusin', e => { const tr = e.target.closest('tr'); if (tr && tr !== selected()) pickLine(tr); });
+document.getElementById('removeRow').onclick = () => {
+  const tr = selected();
+  if (!tr) return alert('Click a line to select it first.');
+  const next = tr.nextElementSibling || tr.previousElementSibling;
+  tr.remove(); recalc(); if (next) pickLine(next);
+};
+function showView(v) {
+  document.querySelectorAll('.fo-view').forEach(x => x.classList.toggle('on', x.dataset.view === v));
+  document.querySelectorAll('section[data-view]').forEach(s => s.hidden = s.dataset.view !== v);
+}
+document.querySelectorAll('.fo-view').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+const cmdTotals = document.getElementById('cmdTotals');
+if (cmdTotals) cmdTotals.onclick = () => {
+  showView('lines');
+  const p = document.getElementById('totalsPane'); p.open = true; p.scrollIntoView({behavior: 'smooth'});
+};
+// a required field on the hidden Header view would block saving silently: show that view
+document.getElementById('docForm').addEventListener('invalid', e => {
+  const s = e.target.closest('section[data-view]'); if (s && s.hidden) showView(s.dataset.view);
+}, true);
+</script>

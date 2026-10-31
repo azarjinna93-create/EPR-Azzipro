@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% set priced = doc.doc_type not in UNPRICED %}
+{% block content %}
+<h2>{{ DOC_TYPES[doc.doc_type] }} <span class="docno">{{ doc.doc_no }}</span>
+  <span class="status {{ doc.status }}">{{ doc.status }}</span></h2>
+
+<!-- Workflow tracker: SO -> DN -> INV or PO -> GRN -> PI -->
+<div class="flow card">
+  {% for t in flow %}
+    {% set docs = chain.get(t, []) %}
+    {% set all_done = docs and docs|rejectattr('status', 'equalto', 'Submitted')|list|length == 0 %}
+    <div class="step {{ 'done' if all_done else ('draft' if docs else '') }} {{ 'current' if doc.id in docs|map(attribute='id')|list }}">
+      <span class="dot">{{ loop.index }}</span>
+      <div>
+        <b>{{ DOC_TYPES[t] }}{% if docs|length > 1 %} ({{ docs|length }}){% endif %}</b><br>
+        {% for c in docs %}<a href="{{ url_for('doc_view', doc_id=c.id) }}" class="{{ 'b' if c.id == doc.id }}">{{ c.doc_no }}</a>{% if c.status == 'Draft' %} <span class="muted small">(draft)</span>{% endif %}{{ ', ' if not loop.last }}
+        {% else %}<span class="muted">Not created</span>{% endfor %}
+      </div>
+    </div>
+    {% if not loop.last %}<div class="arrow">→</div>{% endif %}
+  {% endfor %}
+</div>
+
+{% if final %}
+<div class="flash ok">🔒 Posted — this {{ DOC_TYPES[doc.doc_type] }} can't be changed or deleted.
+  {% if doc.doc_type in ('INV', 'PI') %}Corrections are made with a {{ 'Debit' if doc.doc_type == 'PI' else 'Credit' }} Note.{% endif %}
+  {% if doc.customer_id %}<a href="{{ url_for('statement', kind='supplier' if doc.doc_type in PURCHASE_FLOW else 'customer', cid=doc.customer_id) }}">
+    {{ 'Supplier' if doc.doc_type in PURCHASE_FLOW else 'Customer' }} account</a>{% endif %}</div>
+{% endif %}
+{% if settlement %}
+<div class="card settle">
+  <div><span class="muted">Invoice total</span><b>{{ S.currency }} {{ doc.base_total|money }}</b>
+    {% if doc.currency and doc.currency != BASE_CUR %}<span class="muted small">{{ doc.currency }} {{ doc.total|money }} @ {{ '%g'|format(doc.exchange_rate) }}</span>{% endif %}</div>
+  <div><span class="muted">{{ 'Received' if settlement.kind == 'receipt' else 'Paid' }}</span><b>{{ settlement.paid|money }}</b></div>
+  <div><span class="muted">Outstanding</span><b class="{{ 'pending' if settlement.outstanding > 0 }}">{{ settlement.outstanding|money }}</b></div>
+  <div><span class="status {{ 'Submitted' if settlement.state == 'Paid' else ('Pending' if settlement.state == 'Partly paid' else 'Draft') }}">{{ settlement.state }}</span></div>
+  <div class="small">{% for v in settlement.vouchers %}<a href="{{ url_for('voucher', vid=v.id) }}">{{ v.voucher_no }}</a>
+    {{ v.pay_date|ddmmyyyy }} · {{ v.mode }} · {{ v.amount|money }}<br>{% endfor %}</div>
+  {% if settlement.outstanding > 0.004 and doc.customer_id and url_ok(url_for('payment_new', kind=settlement.kind)) %}
+  <a class="btn primary" href="{{ url_for('payment_new', kind=settlement.kind, party=doc.customer_id, invoice=doc.id) }}">
+    + {{ 'Receive payment' if settlement.kind == 'receipt' else 'Make payment' }}</a>{% endif %}
+</div>
+{% endif %}
+{% if returned %}
+<div class="flash ok">This invoice has Credit / Debit Notes — they are booked to the account separately; the invoice itself is unchanged.</div>
+{% endif %}
+{% if doc.doc_type in ('SR', 'PR') and doc.notes %}<p><b>Reason for return:</b> {{ doc.notes }}</p>{% endif %}
+{% if invoiced %}
+<div class="flash ok">🔒 Invoiced in <a href="{{ url_for('doc_view', doc_id=invoiced.id) }}"><b>{{ invoiced.doc_no }}</b></a> — this
+  {{ DOC_TYPES[doc.doc_type] }} can no longer be changed or deleted. Make a new {{ DOC_TYPES[doc.doc_type] }} for any correction.</div>
+{% endif %}
+{% if doc.doc_type in ('INV', 'PI') and sources|length > 1 %}
+<p class="muted">Made from {{ sources|length }} {{ DOC_TYPES[sources[0].doc_type] }}s:
+  {% for s_ in sources %}<a href="{{ url_for('doc_view', doc_id=s_.id) }}">{{ s_.doc_no }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+{% endif %}
+{# what this user may do here (User setup access) #}
+{% set w = url_ok(url_for('doc_form', doc_id=doc.id)) %}
+{% set next_ok = next_type and url_ok(url_for('invoice_select', doc_type=next_type)) %}
+<div class="actions">
+  <a class="btn" href="{{ url_for('doc_print', doc_id=doc.id) }}" target="_blank">🖨 Print</a>
+  {% if editable and w %}<a class="btn light" href="{{ url_for('doc_form', doc_id=doc.id) }}">Edit</a>{% endif %}
+  {% if doc.status == 'Draft' and w %}
+    <form method="post" action="{{ url_for('doc_submit', doc_id=doc.id) }}" class="inline"
+          onsubmit="return confirm('Submit {{ doc.doc_no }}? After submission it is locked for normal users.')">
+      <button class="btn primary">Submit</button></form>
+  {% endif %}
+
+  {% if next_type %}
+    {% for ch in children %}
+      <a class="btn" href="{{ url_for('doc_view', doc_id=ch.id) }}">Open {{ ch.doc_no }}</a>
+    {% endfor %}
+    {% if not next_ok %}
+    {% elif can_next and req_state == 'pending' %}
+      <button class="btn primary" disabled>⏳ {{ DOC_TYPES[next_type] }} request awaiting admin approval</button>
+      <a class="btn light" href="{{ url_for('my_requests') }}">My requests</a>
+    {% elif can_next and next_type in ('SR', 'PR') and not req_state %}
+      <a class="btn primary" href="{{ url_for('note_request', doc_type=next_type, inv_id=doc.id) }}">🔑 Request {{ DOC_TYPES[next_type] }}
+        (returnable {{ open_qty|num }})</a>
+    {% elif can_next %}
+      <a class="btn primary" href="{{ url_for('doc_form', doc_type=next_type, **{'from': doc.id}) if next_type in ('DN', 'GRN', 'SR', 'PR')
+                                      else url_for('invoice_select', doc_type=next_type, **{'from': doc.id}) }}">+ Create {{ DOC_TYPES[next_type] }}
+        {%- if lines %} ({{ 'returnable' if next_type in ('SR', 'PR') else 'pending' }} {{ open_qty|num }}){% endif %}
+        {%- if req_state == 'approved' %} ✓ approved{% endif %}</a>
+    {% elif doc.status != 'Submitted' %}
+      <button class="btn primary" disabled title="Submit this {{ DOC_TYPES[doc.doc_type] }} first">+ Create {{ DOC_TYPES[next_type] }}</button>
+      <span class="muted small">Submit first to enable {{ DOC_TYPES[next_type] }}</span>
+    {% elif lines and (next_type not in ('SR', 'PR') or children) %}
+      <span class="status Submitted">Fully {{ {'GRN': 'received', 'DN': 'delivered'}.get(next_type, 'returned') }}</span>
+    {% endif %}
+  {% endif %}
+
+  {% if current_user.role == 'admin' and not invoiced and not returned and not final %}
+    <span class="spacer"></span>
+    <form method="post" action="{{ url_for('doc_delete', doc_id=doc.id) }}" class="inline"
+          onsubmit="return confirm('Delete {{ doc.doc_no }}? This cannot be undone.')">
+      <button class="btn danger">Delete</button></form>
+  {% endif %}
+</div>
+
+<div class="two-col">
+  <div class="card kv">
+    <h3>{{ doc.cust_name }}</h3>
+    <p>Area: {{ doc.cust_area }}<br>P.O.Box: {{ doc.cust_po_box }}<br>Contact: {{ doc.cust_contact }}<br>TRN: {{ doc.cust_trn }}</p>
+  </div>
+  <div class="card kv">
+    <p>Date: <b>{{ doc.doc_date|ddmmyyyy }}</b><br>
+      Default warehouse: <b>{{ WAREHOUSES[doc.warehouse_id].code ~ ' · ' ~ WAREHOUSES[doc.warehouse_id].name if doc.warehouse_id in WAREHOUSES else '-' }}</b><br>
+      {% if doc.doc_type == 'GRN' %}Supplier DO No: <b>{{ doc.supplier_do_no }}</b> · DO Date: <b>{{ doc.supplier_do_date|ddmmyyyy }}</b><br>
+      {% elif doc.doc_type == 'PI' %}Supplier Invoice No: <b>{{ doc.supplier_inv_no or '-' }}</b> · Invoice Date: <b>{{ doc.supplier_inv_date|ddmmyyyy if doc.supplier_inv_date else '-' }}</b><br>
+      Supplier DO: {% for s_ in sources %}<b>{{ s_.supplier_do_no or '-' }}</b> ({{ s_.supplier_do_date|ddmmyyyy }}){{ ', ' if not loop.last }}{% endfor %}<br>{% endif %}
+      Kind Attention: {{ doc.attention }}<br>{{ 'Supplier Ref' if doc.doc_type in PURCHASE_FLOW else 'LPO No' }}: {{ doc.lpo_no }}<br>
+      Delivery Location: {{ doc.delivery_location }}<br>Payment Terms: {{ doc.payment_terms }}<br>Dispatch: {{ doc.dispatch_mode }}</p>
+    <p class="muted small">Created by {{ users.get(doc.created_by, '-') }} on {{ doc.created_at }}
+      {% if doc.submitted_at %}<br>Submitted by {{ users.get(doc.submitted_by, '-') }} on {{ doc.submitted_at }}{% endif %}
+      {% if doc.updated_at %}<br>Last edited by {{ users.get(doc.updated_by, '-') }} on {{ doc.updated_at }}{% endif %}</p>
+  </div>
+</div>
+
+{% if lines and doc.status == 'Submitted' and (next_type in ('DN', 'GRN') or children) %}
+{% set word = {'GRN': 'Received', 'DN': 'Delivered'}.get(next_type, 'Returned') %}
+<h3>{{ word }} vs {{ 'invoiced' if next_type in ('SR', 'PR') else 'ordered' }}</h3>
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>S/No</th><th>Item</th><th class="r">{{ 'Invoiced' if next_type in ('SR', 'PR') else 'Ordered' }}</th><th class="r">{{ word }}</th>
+    <th class="r">{{ 'Returnable' if next_type in ('SR', 'PR') else 'Pending' }}</th><th>Unit</th><th style="width:30%">Progress</th></tr></thead>
+  <tbody>
+  {% for l in lines %}
+    <tr><td class="center">{{ l.sl }}</td><td><b>{{ l.title }}</b>{% if l.code %} <span class="muted small">{{ l.code }}</span>{% endif %}</td>
+      <td class="r">{{ l.qty|num }}</td><td class="r">{{ l.done|num }}</td>
+      <td class="r">{% if l.pending > 0 %}<b class="pending">{{ l.pending|num }}</b>{% else %}0{% endif %}</td><td>{{ l.unit }}</td>
+      <td><div class="bar"><span style="width:{{ [100, (l.done / l.qty * 100) if l.qty else 100]|min }}%"></span></div></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<h3>{{ 'Invoice' if next_type in ('SR', 'PR') else 'Order' }} lines</h3>
+{% endif %}
+
+<div class="table-wrap">
+<table class="grid">
+  {% if priced %}
+  <thead><tr><th>S/No</th><th>Item</th><th>Specification</th><th class="r">Qty</th><th>Unit</th><th>Warehouse</th><th class="r">Unit Price</th>
+    <th class="r">Value</th></tr></thead>
+  <tbody>
+  {% for it in items %}
+    <tr><td class="center">{{ it.sl }}</td><td><b>{{ it.title }}</b>{% if it.code %}<br><span class="muted small">{{ it.code }}</span>{% endif %}</td><td class="pre small">{{ it.details }}</td>
+      <td class="r">{{ it.qty|num }}</td><td>{{ it.unit }}</td><td>{{ WAREHOUSES[it.warehouse_id].code if it.warehouse_id in WAREHOUSES else '' }}</td><td class="r">{{ it.rate|money }}{% if it|disc %}<br><span class="small muted">{{ it|disc }}</span>{% endif %}</td><td class="r">{{ it.amount|money }}</td>
+</tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><td colspan="3" class="r"><b>Total Qty</b></td><td class="r"><b>{{ doc.total_qty|num }}</b></td><td></td><td></td>
+      <td class="r">Total Value</td><td class="r"><b>{{ doc.subtotal|money }}</b></td></tr>
+    {% if doc.discount_amount %}
+    <tr><td colspan="7" class="r">Less Discount{% if doc.discount_type == 'percent' %} ({{ doc.discount_value|num }}%){% endif %}</td><td class="r">-{{ doc.discount_amount|money }}</td></tr>
+    <tr><td colspan="7" class="r">Taxable Amount</td><td class="r">{{ (doc.subtotal - doc.discount_amount)|money }}</td></tr>
+    {% endif %}
+    <tr><td colspan="7" class="r">VAT {{ doc.vat_rate|num }}%</td><td class="r">{{ doc.vat_amount|money }}</td></tr>
+    {% for c in charges %}<tr><td colspan="7" class="r">Landed cost · {{ c.description }} <span class="muted small">({% if c.currency and c.currency != doc.currency %}{{ c.currency }} {{ c.amount|money }} @ {{ '%g'|format(c.rate) }}, {% endif %}no VAT)</span></td>
+      <td class="r">{{ (c.base_amount / (doc.exchange_rate or 1))|money }}</td></tr>{% endfor %}
+    <tr><td colspan="7" class="r"><b>Grand Total {{ doc.currency or S.currency }}</b></td><td class="r"><b>{{ doc.total|money }}</b></td></tr>
+    {% if doc.currency and doc.currency != BASE_CUR %}<tr><td colspan="7" class="r">Exchange rate {{ '%g'|format(doc.exchange_rate) }} · Total in {{ BASE_CUR }}</td>
+      <td class="r"><b>{{ doc.base_total|money }}</b></td></tr>{% endif %}
+  </tfoot>
+  {% else %}
+  <thead><tr><th>S/No</th><th>Item</th><th>Specification</th><th class="r">Qty</th><th>Unit</th><th>Warehouse</th></tr></thead>
+  <tbody>
+  {% for it in items %}
+    <tr><td class="center">{{ it.sl }}</td><td><b>{{ it.title }}</b>{% if it.code %}<br><span class="muted small">{{ it.code }}</span>{% endif %}</td><td class="pre small">{{ it.details }}</td>
+      <td class="r">{{ it.qty|num }}</td><td>{{ it.unit }}</td><td>{{ WAREHOUSES[it.warehouse_id].code if it.warehouse_id in WAREHOUSES else '' }}</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="3" class="r"><b>Total Qty</b></td><td class="r"><b>{{ doc.total_qty|num }}</b></td><td></td><td></td></tr></tfoot>
+  {% endif %}
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% set title = 'Receipt' if kind == 'receipt' else 'Payment' %}
+{% set pk = 'customer' if kind == 'receipt' else 'supplier' %}
+{% block content %}
+<div class="fo-page">
+<div class="fo-crumb"><a href="{{ url_for('payments', kind=kind) }}">All {{ title|lower }}s</a> <span>|</span> Standard view</div>
+<div class="fo-title">
+  <h1>{{ preview_no }} : New {{ title|lower }}{% if party %} - {{ party.name|upper }}{% endif %}</h1>
+  {% if party %}<div class="fo-state"><span>Balance {{ 'receivable' if kind == 'receipt' else 'payable' }}</span>
+    <b>{{ S.currency }} {{ balance|money }}</b></div>{% endif %}
+</div>
+
+<form method="get" class="fo-filters">
+  <label class="inline-label">{{ pk|title }} *
+    <select name="party" onchange="this.form.submit()" required>
+      <option value="">— choose {{ pk }} —</option>
+      {% for p in parties %}<option value="{{ p.id }}" {{ 'selected' if party and p.id == party.id }}>{{ p.name }}</option>{% endfor %}
+    </select></label>
+  {% if party %}<a class="small" href="{{ url_for('statement', kind=pk, cid=party.id) }}">statement</a>{% endif %}
+</form>
+
+{% if party %}
+<form method="post" id="payForm" autocomplete="off">
+  <input type="hidden" name="party" value="{{ party.id }}">
+  <div class="fo-pane">
+    <div class="fo-cmdbar">
+      <a class="fo-cmd" href="{{ url_for('payments', kind=kind) }}" title="Back">←</a>
+      <button class="fo-cmd" id="postBtn" onclick="return confirmPost()">✔ Post {{ title|lower }}</button>
+      <button type="button" class="fo-cmd" id="auto">⇣ Auto-allocate (oldest first)</button>
+      <button type="button" class="fo-cmd" id="clear">✕ Clear allocations</button>
+      <span class="fo-sep"></span>
+      <span class="fo-tab on">{{ title }}</span>
+      <span class="spacer"></span>
+      <a class="fo-cmd" href="{{ url_for('payments', kind=kind) }}">Cancel</a>
+    </div>
+  </div>
+
+  <details class="fo-fast" open>
+    <summary>{{ title }} header</summary>
+    <div class="fo-fields pi-fields">
+      <div class="fo-col">
+        <h5>{{ title }}</h5>
+        <div class="fo-f"><label>Date *</label><input type="date" name="pay_date" value="{{ today }}" required></div>
+        <div class="fo-f"><label>Amount ({{ S.currency }}) *</label><input name="amount" id="amount" type="number" step="0.01" min="0.01" required></div>
+      </div>
+      <div class="fo-col">
+        <h5>Method of payment</h5>
+        <div class="fo-f"><label>Mode</label><select name="mode" id="mode">{% for m in modes %}<option>{{ m }}</option>{% endfor %}</select></div>
+        <div class="fo-f"><label>Reference / Cheque No</label><input name="reference" placeholder="Transfer ref, cheque no…"></div>
+      </div>
+      <div class="fo-col">
+        <h5>Bank</h5>
+        <div class="fo-f"><label>Bank</label><input name="bank"></div>
+        <div class="fo-f"><label>Cheque date</label><input type="date" name="cheque_date"></div>
+      </div>
+      <div class="fo-col">
+        <h5>Notes</h5>
+        <div class="fo-f"><label>Notes</label><input name="notes"></div>
+      </div>
+      <div class="fo-col">
+        <h5>Summary</h5>
+        <div class="fo-f"><label>Amount</label><span id="sAmt">0.00</span></div>
+        <div class="fo-f"><label>Allocated to invoices</label><span id="sAlloc">0.00</span></div>
+        <div class="fo-f"><label>On account (advance)</label><span id="sOn">0.00</span></div>
+      </div>
+    </div>
+  </details>
+
+  <div class="fo-fast pi-lines">
+    <div class="pi-lines-head">Allocate to open {{ 'Tax Invoices' if kind == 'receipt' else 'Purchase Invoices' }}</div>
+    <div class="fo-gridbar">
+      <span class="muted">Anything not allocated stays on the {{ pk }}'s account. Drag a column heading to move it, or its right edge to resize.</span>
+      <button type="button" class="fo-link" data-cols-reset="alloc-{{ kind }}">Reset columns</button>
+      <span class="bad-big small" id="warn"></span>
+    </div>
+    <div class="fo-gridwrap">
+    <table class="fo-grid pi-grid sheet" id="allocs" data-cols="alloc-{{ kind }}">
+      <thead><tr><th class="sel"></th><th data-col="inv">Invoice</th><th data-col="date">Date</th><th data-col="terms">Payment terms</th>
+        <th class="r" data-col="total">Total</th><th class="r" data-col="paid">Already {{ 'received' if kind == 'receipt' else 'paid' }}</th>
+        <th class="r" data-col="out">Outstanding</th><th class="r" data-col="alloc">Allocate now</th></tr></thead>
+      <tbody>
+      {% for i in invoices %}
+        <tr>
+          <td class="sel"><span class="radio"></span></td>
+          <td data-col="inv"><a href="{{ url_for('doc_view', doc_id=i.id) }}" target="_blank"><b>{{ i.doc_no }}</b></a></td>
+          <td data-col="date">{{ i.doc_date|ddmmyyyy }}</td>
+          <td data-col="terms">{{ i.payment_terms or '' }}</td>
+          <td class="r" data-col="total">{{ i.total|money }}</td>
+          <td class="r" data-col="paid">{{ i.paid|money }}</td>
+          <td class="r" data-col="out"><b>{{ i.outstanding|money }}</b></td>
+          <td data-col="alloc"><input type="hidden" name="alloc_id" value="{{ i.id }}">
+            <input name="alloc_amount" class="alloc n" type="number" step="0.01" min="0" max="{{ i.outstanding }}"
+                   data-out="{{ i.outstanding }}" data-pre="{{ 1 if preselect == i.id else 0 }}"></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="muted center">No open invoices — the whole amount goes on account.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</form>
+
+<script>
+const amt = document.getElementById('amount');
+const allocs = [...document.querySelectorAll('.alloc')];
+const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
+const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+function sum() {
+  const a = r2(+amt.value || 0), s = r2(allocs.reduce((t, i) => t + (+i.value || 0), 0));
+  document.getElementById('sAmt').textContent = fmt(a);
+  document.getElementById('sAlloc').textContent = fmt(s);
+  document.getElementById('sOn').textContent = fmt(r2(a - s));
+  const over = s > a + 0.004 || allocs.some(i => +i.value > +i.dataset.out + 0.004);
+  document.getElementById('warn').textContent = over ? 'Allocations are more than the amount or an invoice outstanding.' : '';
+  document.getElementById('postBtn').disabled = over;
+}
+document.getElementById('auto').onclick = () => {
+  let left = r2(+amt.value || 0);
+  if (!left) {  // no amount yet: settle everything outstanding
+    left = r2(allocs.reduce((t, i) => t + +i.dataset.out, 0));
+    amt.value = left.toFixed(2);
+  }
+  allocs.forEach(i => { const v = Math.min(left, +i.dataset.out); i.value = v > 0 ? v.toFixed(2) : ''; left = r2(left - v); });
+  sum();
+};
+// Amount follows the allocations until the user types an amount of their own, so lowering an allocation
+// never leaves the old amount behind as an unintended advance
+let amtTyped = false;
+const follow = () => { if (!amtTyped) amt.value = r2(allocs.reduce((t, i) => t + (+i.value || 0), 0)).toFixed(2); };
+document.getElementById('clear').onclick = () => { allocs.forEach(i => i.value = ''); follow(); sum(); };
+amt.oninput = () => { amtTyped = amt.value !== ''; sum(); };
+allocs.forEach(i => i.oninput = () => { follow(); sum(); });
+// opened from an invoice: settle that invoice
+const pre = allocs.find(i => i.dataset.pre === '1');
+if (pre) { pre.value = (+pre.dataset.out).toFixed(2); amt.value = pre.value; }
+sum();
+function confirmPost() {
+  const a = r2(+amt.value || 0), s = r2(allocs.reduce((t, i) => t + (+i.value || 0), 0)), adv = r2(a - s);
+  const cur = '{{ S.currency }} ';
+  return confirm(`Post this {{ title }} of ${cur}${fmt(a)}?\n\nAgainst invoices: ${cur}${fmt(s)}`
+    + (adv > 0 ? `\nOn account (advance): ${cur}${fmt(adv)}\n\nThe advance is NOT against any invoice. Press Cancel to change the amount.` : '')
+    + '\n\nA posted voucher cannot be edited.');
+}
+document.querySelector('#allocs tbody').addEventListener('click', e => {
+  const tr = e.target.closest('tr'); if (tr) document.querySelectorAll('#allocs tbody tr').forEach(x => x.classList.toggle('on', x === tr));
+});
+</script>
+{% endif %}
+</div>
+{% endblock %}

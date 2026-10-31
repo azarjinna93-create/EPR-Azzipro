@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Purchase order approval workflow{% endblock %}
+{% block content %}
+<div class="fo-page">
+<div class="fo-crumb">Procurement and sourcing <span>|</span> Setup</div>
+<div class="fo-title">
+  <h1>Purchase order approval workflow</h1>
+  <form method="post" class="wf-switch">
+    <input type="hidden" name="act" value="toggle">
+    <input type="hidden" name="enabled" value="{{ '0' if po_wf_on else '1' }}">
+    <span class="fo-state"><span>Workflow</span><b class="{{ 'wf-on' if po_wf_on else 'wf-off' }}">{{ 'Enabled' if po_wf_on else 'Disabled' }}</b></span>
+    <button class="btn {{ 'danger' if po_wf_on else 'primary' }}"
+            onclick="return confirm('{{ 'Disable the workflow? New purchase orders will be approved as soon as they are submitted.' if po_wf_on else 'Enable the workflow? Submitted purchase orders will need approval before goods can be received.' }}')">
+      {{ 'Disable' if po_wf_on else 'Enable' }}</button>
+  </form>
+</div>
+
+<p class="muted">
+  {% if po_wf_on %}Submitted purchase orders go through the steps below in order. Each step is approved by any one of its approvers.
+  A rejection returns the PO to draft; resubmitting starts again from the first step.
+  {% else %}The workflow is off: submitting a purchase order approves it straight away. Set up the steps, then enable it.{% endif %}
+</p>
+
+<details class="fo-fast" open>
+  <summary>Approval steps</summary>
+  <div class="fo-gridwrap">
+  <table class="fo-grid wf-steps">
+    <thead><tr><th class="r">Step</th><th>Name</th><th>Applies when PO total is</th><th>Approvers (any one)</th>
+      <th class="r">Waiting</th><th></th></tr></thead>
+    <tbody>
+    {% for st in steps %}
+      {% set ids = step_approvers(st) %}
+      <tr>
+        <td class="r">{{ loop.index }}</td>
+        <td><b>{{ st.name }}</b></td>
+        <td>{% if st.min_amount %}{{ S.currency }} {{ st.min_amount|money }} or more{% else %}Always{% endif %}</td>
+        <td>{% for u in users if u.id in ids %}{{ u.full_name or u.username }}{{ ', ' if not loop.last }}{% else %}<span class="pending">No active approver</span>{% endfor %}</td>
+        <td class="r">{{ waiting.get(st.id, 0) }}</td>
+        <td class="nowrap r">
+          <form method="post" class="inline"><input type="hidden" name="act" value="up"><input type="hidden" name="id" value="{{ st.id }}">
+            <button class="btn small light" {{ 'disabled' if loop.first }} title="Move up">↑</button></form>
+          <form method="post" class="inline"><input type="hidden" name="act" value="down"><input type="hidden" name="id" value="{{ st.id }}">
+            <button class="btn small light" {{ 'disabled' if loop.last }} title="Move down">↓</button></form>
+          <a class="btn small light" href="{{ url_for('po_workflow_setup', edit=st.id) }}">Edit</a>
+          <form method="post" class="inline" onsubmit="return confirm('Delete step {{ st.name }}?')">
+            <input type="hidden" name="act" value="delete"><input type="hidden" name="id" value="{{ st.id }}">
+            <button class="btn small danger">Delete</button></form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted center">No steps yet. Add the first approval step below.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+
+<details class="fo-fast" open>
+  <summary>{{ 'Edit step: ' ~ edit.name if edit else 'Add approval step' }}</summary>
+  <form method="post" class="wf-form">
+    <input type="hidden" name="act" value="save">
+    {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+    <div class="row">
+      <label>Step name *<input name="name" required value="{{ edit.name if edit }}" placeholder="e.g. Purchase manager"></label>
+      <label>Only when PO total is at least ({{ S.currency }})
+        <input name="min_amount" type="number" step="0.01" min="0" value="{{ edit.min_amount if edit and edit.min_amount else '' }}" placeholder="0 = every PO"></label>
+    </div>
+    {% set chosen = step_approvers(edit) if edit else [] %}
+    <div class="wf-approvers"><span class="lbl">Approvers * <small class="muted">(any one of them can approve this step)</small></span>
+      {% for u in users %}
+      <label class="check"><input type="checkbox" name="approvers" value="{{ u.id }}" {{ 'checked' if u.id in chosen }}>
+        {{ u.full_name or u.username }} <small class="muted">{{ u.username }} · {{ u.role }}</small></label>
+      {% endfor %}
+    </div>
+    <button class="btn primary">{{ 'Update step' if edit else 'Add step' }}</button>
+    {% if edit %}<a class="btn light" href="{{ url_for('po_workflow_setup') }}">Cancel</a>{% endif %}
+  </form>
+</details>
+<p class="muted small">Approvers can't approve purchase orders they created themselves. Admins can approve or reject at any step.</p>
+</div>
+{% endblock %}

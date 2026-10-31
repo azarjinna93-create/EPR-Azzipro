@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-card card">
+  <h1>🔒 Admin Panel</h1>
+  <p class="muted">Enter your password to open the Admin Panel.</p>
+  <form method="post">
+    <label>User Name<input value="{{ current_user.username }}" disabled></label>
+    <label>Password<input name="password" type="password" required autofocus autocomplete="current-password"></label>
+    <button class="btn primary wide">Unlock</button>
+  </form>
+</div>
+{% endblock %}

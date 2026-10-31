@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}All sales orders{% endblock %}
+{% block content %}
+{% set w = url_ok(url_for('documents', type='SO', new=1)) %}
+{% set next_ok = url_ok(url_for('documents', type='DN', new=1)) %}
+
+<div class="fo-page">
+{# Command bar + action pane, laid out like the purchase order list; actions marked data-act work on the selected order #}
+<div class="fo-pane">
+  <div class="fo-cmdbar">
+    <a class="fo-cmd" href="{{ url_for('dashboard') }}" title="Back" data-nav-back>←</a>
+    {% if w %}<button type="button" class="fo-cmd" data-open-create>＋ New</button>{% endif %}
+    <a class="fo-cmd" data-act="edit" href="#">✎ Edit</a>
+    <span class="fo-sep"></span>
+    {% for key, label in [('so', 'Sales order'), ('ship', 'Pick and pack'), ('invoice', 'Invoice'), ('general', 'General')] %}
+    <button type="button" class="fo-tab {{ 'on' if key == 'so' }}" data-pane="{{ key }}">{{ label }}</button>
+    {% endfor %}
+    <span class="spacer"></span>
+    <button type="button" class="fo-cmd" id="foPaneToggle" title="Show / hide the action pane">⌃</button>
+  </div>
+  <div class="fo-ribbon" id="foRibbon">
+    <div class="fo-panel" data-pane="so">
+      <div class="fo-group"><h4>New</h4>
+        {% if w %}<button type="button" class="fo-link" data-open-create>Sales order</button>{% endif %}
+      </div>
+      <div class="fo-group"><h4>Maintain</h4>
+        <a data-act="open" href="#">Open</a>
+        <a data-act="edit" href="#">Edit</a>
+      </div>
+      <div class="fo-group"><h4>Print</h4>
+        <a data-act="print" href="#" target="_blank">Sales order</a>
+      </div>
+    </div>
+    <div class="fo-panel" data-pane="ship" hidden>
+      <div class="fo-group"><h4>Generate</h4>
+        <a data-act="deliver" href="#">Delivery note</a>
+      </div>
+      <div class="fo-group"><h4>Journals</h4>
+        <a href="{{ url_for('documents', type='DN') }}">Delivery notes</a>
+        <a href="{{ url_for('inventory') }}">Stock summary</a>
+      </div>
+    </div>
+    <div class="fo-panel" data-pane="invoice" hidden>
+      <div class="fo-group"><h4>Generate</h4>
+        {% if url_ok(url_for('invoice_select', doc_type='INV')) %}<a href="{{ url_for('invoice_select', doc_type='INV') }}">Tax invoice</a>{% endif %}
+        {% if url_ok(url_for('return_select', doc_type='SR')) %}<a href="{{ url_for('return_select', doc_type='SR') }}">Credit note</a>{% endif %}
+      </div>
+      <div class="fo-group"><h4>Journals</h4>
+        <a href="{{ url_for('documents', type='INV') }}">Tax invoices</a>
+        <a href="{{ url_for('documents', type='SR') }}">Credit notes</a>
+      </div>
+    </div>
+    <div class="fo-panel" data-pane="general" hidden>
+      <div class="fo-group"><h4>Customer</h4>
+        <a href="{{ url_for('customers') }}">Customer master</a>
+        <a href="{{ url_for('accounts', kind='customer') }}">Customer accounts</a>
+      </div>
+      <div class="fo-group"><h4>Inquiry</h4>
+        <a href="{{ url_for('billing_log', type='SO') }}">Transaction log</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fo-crumb">All sales orders</div>
+<h1 class="fo-viewname">Standard view</h1>
+
+<form class="fo-filters" method="get">
+  <input type="hidden" name="type" value="SO">
+  <input type="search" name="q" value="{{ q }}" placeholder="🔍 Filter" aria-label="Filter">
+  <select name="status" onchange="this.form.submit()" aria-label="Status">
+    <option value="">All statuses</option>
+    <option value="Draft" {{ 'selected' if status == 'Draft' }}>Draft</option>
+    <option value="Submitted" {{ 'selected' if status == 'Submitted' }}>Confirmed</option>
+  </select>
+  {% if q or status %}<a href="{{ url_for('documents', type='SO') }}">Clear</a>{% endif %}
+</form>
+
+<div class="fo-listbox">
+  <div class="fo-gridwrap fo-upper">
+  <table class="fo-grid" id="poList">
+    <thead><tr><th class="sel"></th><th>Sales order</th><th>Customer account</th><th>Customer name</th><th>Order type</th><th>Status</th>
+      <th>Sales order status</th><th class="r">Gross total</th><th>Warehouse</th><th>Order date</th><th>Customer reference</th>
+      <th>Mode of delivery</th><th>Delivery location</th><th>Payment terms</th><th>Created by</th></tr></thead>
+    <tbody>
+    {% for d in docs %}
+      {% if d.status == 'Draft' %}{% set ost = 'Draft' %}
+      {% elif d.open_qty and d.child_no %}{% set ost = 'Partly delivered' %}
+      {% elif d.open_qty %}{% set ost = 'Open order' %}
+      {% elif d.id in invoiced %}{% set ost = 'Invoiced' %}
+      {% else %}{% set ost = 'Delivered' %}{% endif %}
+      <tr tabindex="0" data-id="{{ d.id }}"
+          data-open="{{ url_for('doc_view', doc_id=d.id) }}" data-print="{{ url_for('doc_print', doc_id=d.id) }}"
+          data-edit="{{ url_for('doc_form', doc_id=d.id) if w and (d.status == 'Draft' or current_user.role == 'admin') and d.id not in invoiced }}"
+          data-deliver="{{ url_for('doc_form', doc_type='DN', **{'from': d.id}) if next_ok and d.status == 'Submitted' and d.open_qty }}">
+        <td class="sel"><span class="radio"></span></td>
+        <td><a href="{{ url_for('doc_view', doc_id=d.id) }}">{{ d.doc_no }}</a></td>
+        <td>{{ d.party_account or '' }}</td>
+        <td>{{ d.cust_name|upper }}</td>
+        <td>Sales order</td>
+        <td>{{ 'Confirmed' if d.status == 'Submitted' else d.status }}</td>
+        <td>{{ ost }}</td>
+        <td class="r">{{ d.total|money }}</td>
+        <td>{{ WAREHOUSES[d.warehouse_id].code if d.warehouse_id in WAREHOUSES else '' }}</td>
+        <td>{{ d.doc_date|ddmmyyyy }}</td>
+        <td>{{ d.lpo_no or '' }}</td>
+        <td>{{ d.dispatch_mode or '' }}</td>
+        <td>{{ d.delivery_location or '' }}</td>
+        <td>{{ d.payment_terms or '' }}</td>
+        <td>{{ d.creator }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="15" class="muted center">No sales orders found.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  {# Lines of the selected order #}
+  <div class="fo-split">═</div>
+  <div class="fo-gridwrap fo-lower">
+  <table class="fo-grid" id="poLines">
+    <thead><tr><th class="sel"></th><th>Item number</th><th>Product name</th><th class="r">Quantity</th><th>Unit</th><th>Warehouse</th>
+      <th class="r">Unit price</th><th class="r">Net amount</th><th class="r">Delivered</th><th class="r">Pending</th></tr></thead>
+    {% for d in docs %}
+    <tbody data-for="{{ d.id }}" hidden>
+      {% for l in lines[d.id] %}
+      <tr><td class="sel"><span class="radio"></span></td><td>{{ l.code or '' }}</td><td>{{ l.title }}</td>
+        <td class="r">{{ l.qty|num }}</td><td>{{ l.unit }}</td><td>{{ WAREHOUSES[l.warehouse_id].code if l.warehouse_id in WAREHOUSES else '' }}</td><td class="r">{{ l.rate|money }}{% if l|disc %}<br><span class="small muted">{{ l|disc }}</span>{% endif %}</td><td class="r">{{ l.amount|money }}</td>
+        <td class="r">{{ l.done|num }}</td><td class="r {{ 'pending' if d.status == 'Submitted' and l.pending > 0 }}">{{ l.pending|num }}</td></tr>
+      {% else %}
+      <tr><td colspan="10" class="muted center">No lines</td></tr>
+      {% endfor %}
+    </tbody>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+{% include "_pager.html" %}
+</div>
+{% include "_po_create.html" %}
+
+<script>
+(function () {
+  const $$ = s => [...document.querySelectorAll(s)];
+  $$('.fo-tab').forEach(t => t.addEventListener('click', () => {
+    $$('.fo-tab').forEach(x => x.classList.toggle('on', x === t));
+    $$('.fo-panel').forEach(p => p.hidden = p.dataset.pane !== t.dataset.pane);
+    document.getElementById('foRibbon').hidden = false;
+  }));
+  document.getElementById('foPaneToggle').addEventListener('click', () => {
+    const r = document.getElementById('foRibbon'); r.hidden = !r.hidden;
+  });
+
+  const rows = $$('#poList tbody tr[data-open]');
+  const acts = $$('[data-act]');
+  function pick(tr) {
+    rows.forEach(r => r.classList.toggle('on', r === tr));
+    $$('#poLines tbody').forEach(b => b.hidden = !tr || b.dataset.for !== tr.dataset.id);
+    acts.forEach(a => {
+      const url = tr ? tr.dataset[a.dataset.act] : '';
+      a.classList.toggle('off', !url);
+      a.href = url || '#';
+    });
+  }
+  acts.forEach(a => a.addEventListener('click', e => { if (a.classList.contains('off')) e.preventDefault(); }));
+  rows.forEach(tr => {
+    tr.addEventListener('click', e => { if (!e.target.closest('a')) pick(tr); });
+    tr.addEventListener('dblclick', () => location.href = tr.dataset.open);
+    tr.addEventListener('keydown', e => {
+      const n = e.key === 'ArrowDown' ? tr.nextElementSibling : e.key === 'ArrowUp' ? tr.previousElementSibling : null;
+      if (n) { e.preventDefault(); n.focus(); pick(n); }
+      if (e.key === 'Enter') location.href = tr.dataset.open;
+    });
+  });
+  pick(rows[0] || null);
+})();
+</script>
+{% endblock %}

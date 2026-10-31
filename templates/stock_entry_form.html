@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block content %}
+{% set label = 'Stock In' if kind == 'IN' else 'Stock Out' %}
+<form method="post" id="seForm" autocomplete="off" class="fo-page">
+  <div class="fo-pane">
+    <div class="fo-cmdbar">
+      <a class="fo-cmd" href="{{ url_for('stock_entries') }}" title="Back">←</a>
+      <button class="fo-cmd" onclick="return confirm('Post this stock entry? A posted entry cannot be edited.')">✔ Post</button>
+      <a class="fo-cmd" href="{{ url_for('stock_entry_new', kind='in') }}">＋ New stock in</a>
+      <a class="fo-cmd" href="{{ url_for('stock_entry_new', kind='out') }}">＋ New stock out</a>
+      <span class="fo-sep"></span>
+      <span class="fo-tab on">{{ label }}</span>
+      <span class="spacer"></span>
+      <a class="fo-cmd" href="{{ url_for('stock_entries') }}">Cancel</a>
+    </div>
+  </div>
+
+  <div class="fo-crumb"><a href="{{ url_for('stock_entries') }}">All stock entries</a> <span>|</span> Standard view</div>
+  <div class="fo-title">
+    <h1>{{ preview_no }} : {{ label }}</h1>
+    <div class="fo-state"><span>Status</span><b>New</b></div>
+  </div>
+  <p class="muted small">
+    {% if kind == 'IN' %}Brings products into a warehouse and posts <b>Dr Inventory / Cr the account below</b>.
+    Each line is valued at the unit cost entered (blank = the product's current average cost).
+    {% else %}Takes products out of a warehouse and posts <b>Dr the account below / Cr Inventory</b>, valued at the current average cost.{% endif %}
+  </p>
+
+  <details class="fo-fast" open>
+    <summary>{{ label }} header</summary>
+    <div class="fo-fields pi-fields">
+      <div class="fo-col">
+        <h5>Entry</h5>
+        <div class="fo-f"><label>Date *</label><input type="date" name="se_date" value="{{ today }}" required></div>
+      </div>
+      <div class="fo-col">
+        <h5>Storage dimensions</h5>
+        <div class="fo-f"><label>Warehouse *</label>
+          <select name="warehouse_id" id="seWh" required>
+            {% for w in WAREHOUSES.values() if w.active %}<option value="{{ w.id }}" {{ 'selected' if w.id == default_wh }}>{{ w.code }} · {{ w.name }}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="fo-col">
+        <h5>Posting</h5>
+        <div class="fo-f"><label>{{ 'Credit' if kind == 'IN' else 'Debit' }} account *</label>
+          <select name="account_id" required>
+            {% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if a.id == default_acc }}>{{ a.code }} · {{ a.name }} ({{ a.type }})</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="fo-col jv-narr">
+        <h5>Description</h5>
+        <div class="fo-f"><label>Narration *</label><input name="narration" required
+          placeholder="{{ 'e.g. Opening stock, samples received, count surplus' if kind == 'IN' else 'e.g. Internal use, damaged goods written off' }}"></div>
+      </div>
+    </div>
+  </details>
+
+  <div class="fo-fast pi-lines">
+    <div class="pi-lines-head">{{ label }} lines</div>
+    <div class="fo-gridbar">
+      <button type="button" class="fo-link" id="addLine">＋ Add line</button>
+      <button type="button" class="fo-link" id="removeLine">🗑 Remove</button>
+      <span class="muted">Type a product code or name. Drag a column heading to move it, or its right edge to resize.</span>
+      <button type="button" class="fo-link" data-cols-reset="se-lines-{{ kind }}">Reset columns</button>
+    </div>
+    <div class="fo-gridwrap">
+    <table class="fo-grid pi-grid sheet" id="lines" data-cols="se-lines-{{ kind }}" data-tpl="lineTpl">
+      <thead><tr><th class="sel"></th><th class="r" data-col="line">Line</th><th data-col="prod">Product</th><th class="r" data-col="stock">In stock</th>
+        <th class="r" data-col="qty">Quantity</th>{% if kind == 'IN' %}<th class="r" data-col="cost">Unit cost</th>{% endif %}<th data-col="note">Line note</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </div>
+  <datalist id="seList"></datalist>
+</form>
+<template id="lineTpl">
+  <tr>
+    <td class="sel"><span class="radio"></span></td>
+    <td class="r sl" data-col="line"></td>
+    <td data-col="prod"><input class="find" list="seList" placeholder="Type product code or name"><input type="hidden" name="product_id"></td>
+    <td class="r stock muted" data-col="stock"></td>
+    <td data-col="qty"><input name="qty" type="number" step="any" min="0" class="n"></td>
+    {% if kind == 'IN' %}<td data-col="cost"><input name="unit_cost" type="number" step="any" min="0" class="n" placeholder="avg"></td>{% endif %}
+    <td data-col="note"><input name="line_note">{% if kind != 'IN' %}<input type="hidden" name="unit_cost" value="">{% endif %}</td>
+  </tr>
+</template>
+<script>
+// Product search per line: asks the server as you type (with stock in the chosen warehouse)
+const tb = document.querySelector('#lines tbody'), tpl = document.getElementById('lineTpl');
+const wh = document.getElementById('seWh');
+let found = [], timer;
+const label = p => `${p.code} · ${p.name}`;
+const number = () => [...tb.rows].forEach((tr, i) => tr.querySelector('.sl').textContent = i + 1);
+function add() { tb.appendChild(tpl.content.firstElementChild.cloneNode(true)); number(); }
+tb.addEventListener('input', e => {
+  if (!e.target.classList.contains('find')) return;
+  const tr = e.target.closest('tr'), pick = found.find(p => label(p) === e.target.value);
+  tr.querySelector('[name=product_id]').value = pick ? pick.id : '';
+  tr.querySelector('.stock').textContent = pick ? `${pick.stock_qty} ${pick.unit || ''}` : '';
+  clearTimeout(timer);
+  if (pick) return;
+  timer = setTimeout(async () => {
+    found = await (await fetch('{{ url_for("api_products") }}?wh=' + wh.value + '&q=' + encodeURIComponent(e.target.value))).json();
+    document.getElementById('seList').innerHTML = found.map(p => `<option value="${label(p).replace(/"/g, '&quot;')}">`).join('');
+  }, 150);
+});
+const pickRow = tr => tb.querySelectorAll('tr').forEach(x => x.classList.toggle('on', x === tr));
+tb.addEventListener('click', e => { const tr = e.target.closest('tr'); if (tr) pickRow(tr); });
+tb.addEventListener('focusin', e => { const tr = e.target.closest('tr'); if (tr) pickRow(tr); });
+document.getElementById('addLine').onclick = add;
+document.getElementById('removeLine').onclick = () => {
+  const tr = tb.querySelector('tr.on');
+  if (!tr) return alert('Click a line to select it first.');
+  tr.remove(); number();
+};
+document.getElementById('seForm').addEventListener('submit', e => {
+  for (const tr of tb.querySelectorAll('tr')) {
+    const typed = tr.querySelector('.find').value || tr.querySelector('[name=qty]').value;
+    if (typed && !tr.querySelector('[name=product_id]').value) { e.preventDefault(); alert('Choose each product from the list.'); return; }
+  }
+});
+add();
+</script>
+{% endblock %}

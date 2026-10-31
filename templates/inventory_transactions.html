@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Inventory transactions - Azzi Soft{% endblock %}
+{% block content %}
+{% set a = request.args %}
+<div class="fo-page" data-back-label="Inventory transactions">
+<div class="fo-pane">
+  <div class="fo-cmdbar">
+    <a class="fo-cmd" href="{{ url_for('inventory') }}" title="Back" data-nav-back>←</a>
+    <a class="fo-cmd" href="{{ url_for('inventory') }}">Stock summary</a>
+    <a class="fo-cmd" href="{{ url_for('inventory_transactions', **dict(a, export=1, page=None)) }}">⬇ Export to Excel (CSV)</a>
+    <button type="button" class="fo-link" data-cols-reset="inv-trans">Reset columns</button>
+  </div>
+</div>
+<div class="fo-crumb">Inventory transactions</div>
+<div class="fo-title"><h1>Standard view</h1></div>
+
+<form class="filters it-filters" method="get">
+  <input type="search" name="q" value="{{ a.q }}" placeholder="🔍 Filter: item, number, document, invoice, party" aria-label="Filter">
+  <select name="ref" aria-label="Reference"><option value="">All references</option>
+    {% for r in references %}<option {{ 'selected' if a.ref == r }}>{{ r }}</option>{% endfor %}</select>
+  <select name="dir" aria-label="Direction"><option value="">Receipts and issues</option>
+    <option value="in" {{ 'selected' if a.dir == 'in' }}>Receipts only</option>
+    <option value="out" {{ 'selected' if a.dir == 'out' }}>Issues only</option></select>
+  <select name="status" aria-label="Status"><option value="">Any status</option>
+    <option value="ordered" {{ 'selected' if a.status == 'ordered' }}>Ordered / On order</option>
+    <option value="physical" {{ 'selected' if a.status == 'physical' }}>Received / Deducted (not invoiced)</option>
+    <option value="financial" {{ 'selected' if a.status == 'financial' }}>Purchased / Sold</option>
+    <option value="moved" {{ 'selected' if a.status == 'moved' }}>Stock movements only (no open orders)</option></select>
+  <select name="wh" aria-label="Warehouse"><option value="">All warehouses</option>
+    {% for w in WAREHOUSES.values() %}<option value="{{ w.id }}" {{ 'selected' if a.wh == w.id|string }}>{{ w.code }}</option>{% endfor %}</select>
+  <label class="small">From <input type="date" name="from" value="{{ a['from'] }}"></label>
+  <label class="small">To <input type="date" name="to" value="{{ a.to }}"></label>
+  <button class="btn small primary">Apply</button>
+  {% if a %}<a class="btn small light" href="{{ url_for('inventory_transactions') }}">Clear</a>{% endif %}
+</form>
+
+<div class="it-totals muted small">{{ count }} transaction{{ 's' if count != 1 }} ·
+  received <b>{{ (totals.qin or 0)|num }}</b> · issued <b>{{ (totals.qout or 0)|num }}</b> ·
+  {% if totals.qordered %}ordered <b>{{ totals.qordered|num }}</b> · {% endif %}
+  {% if totals.qonorder %}on order <b>{{ totals.qonorder|num }}</b> · {% endif %}
+  net cost amount <b>{{ S.currency }} {{ (totals.cost or 0)|money }}</b></div>
+
+<div class="fo-gridwrap">
+<table class="fo-grid it-grid" data-cols="inv-trans">
+  <thead><tr>
+    <th data-col="item">Item number</th><th data-col="iname">Item name</th><th data-col="pdate">Physical date</th>
+    <th data-col="fdate">Financial date</th><th data-col="ref">Reference</th><th data-col="num">Number</th>
+    <th data-col="doc">Document</th><th data-col="inv">Invoice</th><th data-col="rcpt">Receipt</th><th data-col="iss">Issue</th>
+    <th class="r" data-col="qty">Quantity</th><th data-col="unit">Unit</th><th data-col="wh">Warehouse</th>
+    <th class="r" data-col="cost">Cost amount</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'it-ordered' if r.ordered }}">
+      <td data-col="item"><a href="{{ url_for('stock_ledger', pid=r.pid) }}" title="Stock ledger of {{ r.code }}">{{ r.code }}</a></td>
+      <td data-col="iname" class="it-name" title="{{ r.name }}">{{ r.name }}</td>
+      <td data-col="pdate">{{ r.phys_date|ddmmyyyy if r.phys_date }}</td>
+      <td data-col="fdate">{{ r.fin_date|ddmmyyyy if r.fin_date and r.financial }}</td>
+      <td data-col="ref">{{ r.reference }}</td>
+      <td data-col="num">{% if r.order_id %}<a href="{{ url_for('doc_view', doc_id=r.order_id) }}">{{ r.number }}</a>
+        {% elif r.document_id %}<a href="{{ url_for('doc_view', doc_id=r.document_id) }}">{{ r.number }}</a>
+        {% elif r.entry_id %}<a href="{{ url_for('stock_entry_view', eid=r.entry_id) }}">{{ r.number }}</a>
+        {% else %}<span title="{{ r.note }}">{{ r.number }}</span>{% endif %}</td>
+      <td data-col="doc">{% if r.order_id %}<a href="{{ url_for('doc_view', doc_id=r.document_id) }}">{{ r.doc_no }}</a>{% endif %}</td>
+      <td data-col="inv">{% if r.inv_id %}<a href="{{ url_for('doc_view', doc_id=r.inv_id) }}">{{ r.inv_no }}</a>{% endif %}</td>
+      <td data-col="rcpt">{{ r.receipt or '' }}</td>
+      <td data-col="iss">{{ r.issue or '' }}</td>
+      <td class="r" data-col="qty">{{ '%.2f'|format(r.qty) }}</td>
+      <td data-col="unit">{{ r.unit }}</td>
+      <td data-col="wh">{{ r.wh }}</td>
+      <td class="r" data-col="cost">{{ r.cost|money if r.cost is not none }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="14" class="muted center">No inventory transactions{{ ' match the filter' if a }}.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+</div>
+{% endblock %}

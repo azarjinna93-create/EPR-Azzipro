@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Ledger · <span class="docno">{{ a.code }}</span> {{ a.name }} <span class="muted small">{{ a.type }}</span></h2>
+<form class="filters" method="get">
+  <label class="inline-label">From <input type="date" name="from" value="{{ d_from }}"></label>
+  <label class="inline-label">To <input type="date" name="to" value="{{ d_to }}"></label>
+  <button class="btn">Show</button>
+  {% if d_from or d_to %}<a class="btn light" href="{{ url_for('account_ledger', aid=a.id) }}">All dates</a>{% endif %}
+  <span class="spacer"></span>
+  <button type="button" class="btn" onclick="window.print()">🖨 Print</button>
+  <a class="btn light" href="{{ url_for('coa') }}">← Chart of Accounts</a>
+</form>
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Date</th><th>Type</th><th>Entry</th><th>Narration</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead>
+  <tbody>
+    {% if d_from and page == 1 %}<tr><td>{{ d_from|ddmmyyyy }}</td><td colspan="5"><i>Opening balance</i></td><td class="r"><b>{{ opening|drcr }}</b></td></tr>{% endif %}
+  {% for l in lines %}
+    <tr><td class="nowrap">{{ l.date|ddmmyyyy }}</td><td><span class="tag {{ l.type }}">{{ l.type }}</span></td>
+      <td><a href="{{ l.url }}"><b>{{ l.no }}</b></a></td><td class="small">{{ l.narration }}</td>
+      <td class="r">{{ l.debit|money if l.debit }}</td><td class="r">{{ l.credit|money if l.credit }}</td>
+      <td class="r"><b>{{ l.balance|drcr }}</b></td></tr>
+  {% else %}
+    <tr><td colspan="7" class="muted center">No entries{{ ' in this period' if d_from or d_to }}.</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="4" class="r"><b>Closing balance</b></td>
+    <td class="r">{{ total_dr|money }}</td><td class="r">{{ total_cr|money }}</td>
+    <td class="r"><b>{{ closing|drcr }}</b></td></tr></tfoot>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endblock %}

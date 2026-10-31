@@ -1,0 +1,7 @@
+{# Payment terms dropdown options from the master; a value no longer in the list (old documents) stays selectable #}
+{% macro term_options(val) %}
+<option value="">— select —</option>
+{% for t in PAY_TERMS if t.active or t.name == val %}<option {{ 'selected' if t.name == val }}>{{ t.name }}</option>{% endfor %}
+{% if val and val not in PAY_TERMS|map(attribute='name')|list %}<option selected>{{ val }}</option>{% endif %}
+<option value="__add__" class="opt-add">＋ Add new payment term…</option>
+{% endmacro %}

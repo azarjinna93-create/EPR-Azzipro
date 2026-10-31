@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% from "_terms.html" import term_options with context %}
+{% set priced = doc_type not in UNPRICED %}
+{% set purchase = doc_type in PURCHASE_FLOW %}
+{% set party = 'Supplier' if purchase else 'Customer' %}
+{% set cur = (d.currency if d and d.currency and purchase else BASE_CUR) %}
+{% set xr = (d.exchange_rate if d and d.exchange_rate and purchase else 1) %}
+{% block content %}
+{% if doc_type == 'PI' %}{% include "_pi_form.html" %}{% else %}{% include "_doc_page.html" %}{% endif %}
+
+<script>
+const ITEMS = {{ items|tojson }};
+const PENDING = {{ pending|tojson }};  // order line id -> qty still open
+const tbody = document.querySelector('#items tbody');
+const tpl = document.getElementById('rowTpl');
+const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const val = el => parseFloat(el && el.value) || 0;
+const round2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
+const vatRate = () => val(document.getElementById('vat_rate'));
+const xrate = () => val(document.getElementById('exchange_rate')) || 1;  // base currency per 1 unit of the document's
+
+const headWh = document.getElementById('warehouse_id');
+function addRow(it) {
+  const tr = tpl.content.firstElementChild.cloneNode(true);
+  if (headWh) tr.querySelector('[name=line_wh]').value = headWh.value;
+  if (it) {
+    tr.querySelector('[name=title]').value = it.title || '';
+    tr.querySelector('[name=product_id]').value = it.product_id || '';
+    tr.querySelector('[name=source_item_id]').value = it.source_item_id || '';
+    if (it.src_doc && {{ (parents|length > 1)|tojson }}) tr.querySelector('.pend').textContent = 'from ' + it.src_doc;
+    if (it.source_item_id in PENDING) {
+      tr.dataset.pending = PENDING[it.source_item_id];
+      tr.querySelector('.pend').textContent = (it.src_doc && {{ (parents|length > 1)|tojson }} ? it.src_doc + ' · ' : '')
+                                              + '{{ "Returnable " if doc_type in ("SR", "PR") else "Received " if doc_type == "PI" else "Pending " }}'
+                                              + (+PENDING[it.source_item_id]).toLocaleString('en-US');
+    }
+    tr.querySelector('.code').textContent = it.code || '';
+    tr.querySelector('[name=details]').value = it.details || '';
+    tr.querySelector('[name=unit]').value = it.unit || '';
+    if (it.warehouse_id) tr.querySelector('[name=line_wh]').value = it.warehouse_id;
+    for (const k of ['qty', 'rate', 'disc_pct', 'disc_amt']) {
+      const el = tr.querySelector(`[name=${k}]`);
+      if (el && it[k]) el.value = it[k];
+    }
+  }
+  if (window.onRowAdded) onRowAdded(tr, it);  // page-specific columns (vendor invoice page)
+  tbody.appendChild(tr);
+  recalc();
+}
+
+function recalc() {
+  let tq = 0, sub = 0;
+  [...tbody.rows].forEach((tr, i) => {
+    tr.querySelector('.sl').textContent = i + 1;
+    const q = tr.querySelector('[name=qty]');
+    // net = qty x (price - discount per unit) x (1 - discount %), as the server saves it
+    const amt = round2(val(q) * (val(tr.querySelector('[name=rate]')) - val(tr.querySelector('[name=disc_amt]')))
+                       * (1 - val(tr.querySelector('[name=disc_pct]')) / 100));
+    tq += val(q); sub += amt;
+    if (tr.dataset.pending !== undefined) q.classList.toggle('over', val(q) > +tr.dataset.pending);
+    const a = tr.querySelector('.amt'); if (a) a.textContent = fmt(amt);
+  });
+  document.getElementById('totQty').textContent = tq.toLocaleString('en-US');
+  const vr = document.getElementById('vat_rate');
+  if (vr) {
+    sub = round2(sub);
+    const dv = val(document.getElementById('discount_value'));
+    let disc = document.getElementById('discount_type').value === 'percent' ? round2(sub * dv / 100) : round2(dv);
+    disc = Math.min(disc, sub);
+    const vat = round2((sub - disc) * vatRate() / 100);
+    const landed = window.landedTotal ? landedTotal() : 0;  // vendor invoice landed cost charges, no VAT
+    const total = sub - disc + vat + landed;
+    for (const [id, v] of [['sub', sub], ['sub2', sub], ['disc', -disc], ['taxable', sub - disc], ['vat', vat], ['tot', total]])
+      document.getElementById(id).textContent = fmt(v);
+    const lc = document.getElementById('landed');
+    if (lc) lc.textContent = fmt(landed);
+    if (window.afterLanded) afterLanded();
+    const bt = document.getElementById('baseTot');
+    if (bt) bt.textContent = fmt(round2(total * xrate()));
+    document.getElementById('vatPct').textContent = vatRate();
+  }
+  if (window.afterRecalc) afterRecalc();
+}
+
+tbody.addEventListener('input', recalc);
+
+// Product suggestions while typing an item name. The list floats on the page so the table can't clip it.
+const PRICE_KEY = '{{ "purchase_price" if purchase else "sale_price" }}';
+const sugg = Object.assign(document.createElement('ul'), {className: 'combo-list suggest', hidden: true});
+document.body.append(sugg);
+let suggInput = null, suggRows = [], suggActive = -1;
+
+function hideSugg() { sugg.hidden = true; suggInput = null; }
+// Matches come from the server as you type (debounced), so forms stay light however many products there are
+let suggTimer, suggToken = 0;
+function showSugg(input) {
+  clearTimeout(suggTimer);
+  if (!input.value.trim()) return hideSugg();
+  suggTimer = setTimeout(() => fetchSugg(input), 120);
+}
+async function fetchSugg(input) {
+  const token = ++suggToken;
+  const rows = await (await fetch('{{ url_for("api_products") }}?q=' + encodeURIComponent(input.value.trim())
+                              + '&wh=' + input.closest('tr').querySelector('[name=line_wh]').value)).json();
+  // a newer search has started, or the user already left the field
+  if (token !== suggToken || !input.value.trim() || document.activeElement !== input) return;
+  suggRows = rows;
+  suggInput = input; suggActive = suggRows.length ? 0 : -1;
+  sugg.replaceChildren(...suggRows.map((p, i) => {
+    const li = document.createElement('li');
+    const left = document.createElement('span');
+    left.innerHTML = '<b></b> <small></small>';
+    left.querySelector('b').textContent = p.code;
+    left.querySelector('small').textContent = p.name;
+    const right = document.createElement('small');
+    right.textContent = ['Stock ' + (+p.stock_qty).toLocaleString('en-US') + ' ' + (p.unit || ''),
+                         p[PRICE_KEY] ? fmt(p[PRICE_KEY]) : ''].filter(Boolean).join(' · ');
+    if (p.stock_qty <= 0) right.classList.add('nostock');
+    li.append(left, right);
+    li.onmousedown = e => { e.preventDefault(); pickProduct(i); };
+    return li;
+  }));
+  if (!suggRows.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'New item: a product code is created when you save';
+    sugg.append(li);
+  }
+  sugg.hidden = false;
+  placeSugg();
+  markActive();
+}
+function placeSugg() {
+  if (sugg.hidden || !suggInput) return;
+  const r = suggInput.getBoundingClientRect();
+  Object.assign(sugg.style, {left: r.left + 'px', top: r.bottom + 2 + 'px', width: Math.max(r.width, 380) + 'px'});
+}
+function markActive() { [...sugg.children].forEach((li, i) => li.classList.toggle('active', i === suggActive)); }
+function pickProduct(i) {
+  const p = suggRows[i], tr = suggInput.closest('tr');
+  tr.querySelector('[name=title]').value = p.name;
+  tr.querySelector('[name=product_id]').value = p.id;
+  tr.querySelector('.code').textContent = p.code;
+  tr.querySelector('[name=details]').value = p.details || '';
+  if (p.unit) tr.querySelector('[name=unit]').value = p.unit;
+  const rate = tr.querySelector('input[name=rate]:not([type=hidden])');
+  if (rate && p[PRICE_KEY]) rate.value = round2(p[PRICE_KEY] / xrate());  // product prices are kept in {{ BASE_CUR }}
+  hideSugg();
+  recalc();
+  tr.querySelector('[name=qty]').focus();
+}
+tbody.addEventListener('input', e => {
+  if (!e.target.classList.contains('title')) return;
+  const tr = e.target.closest('tr');
+  tr.querySelector('[name=product_id]').value = '';  // typed by hand: matched or created on save
+  tr.querySelector('.code').textContent = '';
+  showSugg(e.target);
+});
+tbody.addEventListener('keydown', e => {
+  if (sugg.hidden || e.target !== suggInput) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (suggRows.length) suggActive = (suggActive + (e.key === 'ArrowDown' ? 1 : -1) + suggRows.length) % suggRows.length;
+    markActive();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (suggActive >= 0) pickProduct(suggActive); else hideSugg();
+  } else if (e.key === 'Escape') hideSugg();
+});
+tbody.addEventListener('focusout', e => { if (e.target === suggInput) setTimeout(hideSugg, 100); });
+window.addEventListener('scroll', placeSugg, true);  // keep the list under its input
+window.addEventListener('resize', placeSugg);
+tbody.addEventListener('click', e => {
+  if (e.target.classList.contains('del')) { e.target.closest('tr').remove(); recalc(); }
+});
+document.getElementById('addRow').onclick = () => addRow();
+// currency: the rate comes from the currency list (it can be changed); the base currency is always 1
+const curSel = document.getElementById('currency');
+if (curSel) curSel.addEventListener('change', () => {
+  const opt = curSel.selectedOptions[0], base = curSel.value === '{{ BASE_CUR }}';
+  document.getElementById('exchange_rate').value = base ? 1 : opt.dataset.rate;
+  document.getElementById('xrBox').hidden = base;
+  document.getElementById('baseRow').hidden = base;
+  document.querySelectorAll('.curCode').forEach(el => el.textContent = curSel.value);
+  recalc();
+});
+const xrIn = document.getElementById('exchange_rate');
+if (xrIn) xrIn.addEventListener('input', recalc);
+// changing the default warehouse moves the lines that were still on the old default
+if (headWh) {
+  let prevWh = headWh.value;
+  headWh.addEventListener('change', () => {
+    tbody.querySelectorAll('[name=line_wh]').forEach(s => { if (s.value === prevWh) s.value = headWh.value; });
+    prevWh = headWh.value;
+  });
+}
+const vr = document.getElementById('vat_rate');
+if (vr) {
+  vr.oninput = recalc;
+  document.getElementById('discount_value').oninput = recalc;
+  document.getElementById('discount_type').onchange = recalc;
+}
+
+// Saved customer / supplier list: hidden until the ▾ button is clicked
+const custBtn = document.getElementById('custBtn');
+if (custBtn) {
+  const list = document.getElementById('custList');
+  const nameInput = document.getElementById('cust_name');
+  const choose = c => {
+    document.getElementById('customer_id').value = c.id;
+    for (const [f, k] of [['cust_name','name'],['cust_area','area'],['cust_po_box','po_box'],['cust_contact','contact'],['cust_trn','trn'],['attention','attention']])
+      document.getElementById(f).value = c[k] || '';
+    list.hidden = true;
+  };
+  const api = q => fetch('{{ url_for("api_parties") }}?kind={{ "supplier" if purchase else "customer" }}&q='
+                         + encodeURIComponent(q)).then(r => r.json());
+  let token = 0;
+  const render = async () => {
+    const my = ++token;
+    let rows = await api(nameInput.value.trim());
+    if (!rows.length && nameInput.value.trim()) rows = await api('');  // nothing matches: show the first ones
+    if (my !== token) return;
+    list.replaceChildren(...rows.map(c => {
+      const li = document.createElement('li');
+      li.textContent = c.name;
+      if (c.area) { const s = document.createElement('small'); s.textContent = c.area; li.append(s); }
+      li.onmousedown = e => { e.preventDefault(); choose(c); };
+      return li;
+    }));
+    if (!rows.length) list.innerHTML = '<li class="empty">No saved {{ party|lower }}s yet</li>';
+  };
+  custBtn.onclick = () => {
+    if (list.hidden) { render(); list.hidden = false; nameInput.focus(); }
+    else list.hidden = true;
+  };
+  nameInput.oninput = () => {
+    document.getElementById('customer_id').value = '';
+    if (!list.hidden) render();
+  };
+  document.addEventListener('click', e => { if (!e.target.closest('.combo')) list.hidden = true; });
+  nameInput.addEventListener('keydown', e => { if (e.key === 'Escape') list.hidden = true; });
+}
+
+// Collapsible Customer/Supplier and document detail cards: closed, they show a one-line summary
+const form = document.getElementById('docForm');
+const fv = name => (form.elements[name] && form.elements[name].value || '').trim();
+function summaries() {
+  if (!document.getElementById('partySummary')) return;  // the vendor invoice page has no collapsible cards
+  document.getElementById('partySummary').textContent = [
+    fv('cust_area'), fv('cust_po_box') && 'P.O.Box ' + fv('cust_po_box'),
+    fv('cust_contact'), fv('cust_trn') && 'TRN ' + fv('cust_trn')].filter(Boolean).join(' · ');
+  const dt = fv('doc_date').split('-').reverse().join('-');
+  document.getElementById('detailsSummary').textContent = [
+    dt && 'Date ' + dt, fv('lpo_no') && '{{ "Ref" if purchase else "LPO" }} ' + fv('lpo_no'),
+    fv('attention') && 'Attn ' + fv('attention'), fv('payment_terms'),
+    {% if priced %}'VAT ' + fv('vat_rate') + '%'{% else %}''{% endif %}].filter(Boolean).join(' · ');
+}
+document.querySelectorAll('.toggle').forEach(btn => btn.onclick = () => {
+  const box = document.getElementById(btn.dataset.target);
+  box.hidden = !box.hidden;
+  btn.textContent = box.hidden ? 'Show details ▾' : 'Hide details ▴';
+  btn.previousElementSibling.hidden = !box.hidden;
+  // remember if the user prefers the document details hidden
+  if (box.id === 'detailsMore') try { localStorage.setItem('azziDetailsHidden', box.hidden ? '1' : '0'); } catch (e) {}
+});
+try {
+  if (localStorage.getItem('azziDetailsHidden') === '1') document.querySelector('[data-target=detailsMore]').click();
+} catch (e) {}
+form.addEventListener('input', summaries);
+form.addEventListener('click', () => setTimeout(summaries));  // after picking a saved customer/supplier
+// A required field inside a closed card would block saving silently: open the card instead
+form.addEventListener('invalid', e => {
+  const box = e.target.closest('.more');
+  if (box && box.hidden) box.parentElement.querySelector('.toggle').click();
+}, true);
+summaries();
+
+(ITEMS.length ? ITEMS : [null]).forEach(addRow);
+
+// "+" opens the Customer / Vendor Master; keep what was typed here so nothing is lost on the way back
+const DRAFT_KEY = 'azziDraft:' + location.pathname;
+const ITEM_FIELDS = ['title', 'details', 'qty', 'unit', 'rate', 'disc_pct', 'disc_amt', 'product_id', 'source_item_id'];
+const addParty = document.getElementById('addParty');
+if (addParty) addParty.addEventListener('click', () => {
+  const head = {};
+  [...form.elements].forEach(el => {
+    if (el.name && !ITEM_FIELDS.includes(el.name) && el.type !== 'button' && el.type !== 'submit') head[el.name] = el.value;
+  });
+  const rows = [...tbody.rows].map(tr => {
+    const it = {code: tr.querySelector('.code').textContent};
+    ITEM_FIELDS.forEach(k => { const el = tr.querySelector('[name=' + k + ']'); if (el) it[k] = el.value; });
+    return it;
+  });
+  try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({head: head, rows: rows})); } catch (e) {}
+});
+const NEW_PARTY = {{ new_party|tojson }};
+if (NEW_PARTY) {
+  let draft = null;
+  try { draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY)); sessionStorage.removeItem(DRAFT_KEY); } catch (e) {}
+  if (draft) {
+    Object.keys(draft.head).forEach(k => {
+      const el = form.elements[k];
+      if (el && el.tagName) el.value = draft.head[k];  // single fields only
+    });
+    if (draft.rows.some(r => r.title || r.details)) {
+      tbody.replaceChildren();
+      draft.rows.forEach(r => addRow(r));
+    }
+  }
+  // fill in the customer / vendor that was just added
+  document.getElementById('customer_id').value = NEW_PARTY.id;
+  [['cust_name', 'name'], ['cust_area', 'area'], ['cust_po_box', 'po_box'], ['cust_contact', 'contact'],
+   ['cust_trn', 'trn'], ['attention', 'attention']].forEach(([f, k]) => { document.getElementById(f).value = NEW_PARTY[k] || ''; });
+  recalc();
+  summaries();
+  history.replaceState(null, '', {{ return_url|tojson }});  // a refresh should not apply it again
+}
+</script>
+{% endblock %}

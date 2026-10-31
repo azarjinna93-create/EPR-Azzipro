@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Change My Password</h2>
+{% if current_user.must_change_pw %}<p class="flash error">Your password was set by the administrator. Choose your own password to continue.</p>{% endif %}
+<form method="post" class="card narrow">
+  <label>Current password<input type="password" name="current" required autocomplete="current-password"></label>
+  <label>New password<input type="password" name="new" required minlength="{{ PW_MIN }}" autocomplete="new-password"></label>
+  <label>Confirm new password<input type="password" name="confirm" required minlength="{{ PW_MIN }}" autocomplete="new-password"></label>
+  <p class="muted small">At least {{ PW_MIN }} characters, mixing letters with digits or symbols.</p>
+  <button class="btn primary">Save</button>
+</form>
+{% endblock %}

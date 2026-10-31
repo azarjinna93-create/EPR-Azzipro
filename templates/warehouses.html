@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Warehouses{% endblock %}
+{% block content %}
+<div class="fo-page">
+<div class="fo-crumb">Inventory management <span>|</span> Setup</div>
+<div class="fo-title"><h1>Warehouses</h1></div>
+<p class="muted">Every sales and purchase document has a warehouse. Goods received (GRN, credit notes) go into it and deliveries
+  (DN, debit notes) come out of it. The default warehouse is used for new documents and stock that had no warehouse.</p>
+
+<div class="fo-listbox">
+  <div class="fo-gridwrap">
+  <table class="fo-grid">
+    <thead><tr><th>Code</th><th>Name</th><th>Location</th><th>Status</th><th class="r">Items in stock</th>
+      <th class="r">Stock value ({{ S.currency }})</th><th class="r">Documents</th><th></th></tr></thead>
+    <tbody>
+    {% for w in rows %}
+      {% set st = stats.get(w.id) %}
+      <tr>
+        <td><b>{{ w.code }}</b>{% if w.id == default_wh %} <span class="status Submitted">Default</span>{% endif %}</td>
+        <td>{{ w.name }}</td><td>{{ w.location }}</td>
+        <td>{% if w.active %}Active{% else %}<span class="status Draft">Inactive</span>{% endif %}</td>
+        <td class="r">{{ st.items if st else 0 }}{% if st and st.negative %} <span class="pending">({{ st.negative }} negative)</span>{% endif %}</td>
+        <td class="r">{{ (st.value if st else 0)|money }}</td>
+        <td class="r">{{ docs.get(w.id, 0) }}</td>
+        <td class="nowrap r">
+          <a class="btn small light" href="{{ url_for('inventory', wh=w.id) }}">Stock</a>
+          {% if current_user.role == 'admin' %}
+          <a class="btn small light" href="{{ url_for('warehouses_page', edit=w.id) }}">Edit</a>
+          {% if w.id != default_wh and w.active %}
+          <form method="post" class="inline"><input type="hidden" name="act" value="default"><input type="hidden" name="id" value="{{ w.id }}">
+            <button class="btn small light">Make default</button></form>{% endif %}
+          {% if w.id != default_wh %}
+          <form method="post" class="inline"><input type="hidden" name="act" value="toggle"><input type="hidden" name="id" value="{{ w.id }}">
+            <button class="btn small light">{{ 'Deactivate' if w.active else 'Activate' }}</button></form>
+          {% if not docs.get(w.id) and not st %}
+          <form method="post" class="inline" onsubmit="return confirm('Delete warehouse {{ w.code }}?')">
+            <input type="hidden" name="act" value="delete"><input type="hidden" name="id" value="{{ w.id }}">
+            <button class="btn small danger">Delete</button></form>{% endif %}
+          {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% if current_user.role == 'admin' %}
+<details class="fo-fast" open>
+  <summary>{{ 'Edit warehouse ' ~ edit.code if edit else 'Add warehouse' }}</summary>
+  <form method="post" class="wf-form">
+    <input type="hidden" name="act" value="save">
+    {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+    <div class="row">
+      <label>Code *<input name="code" required maxlength="12" value="{{ edit.code if edit }}" placeholder="e.g. DXB"></label>
+      <label>Name *<input name="name" required value="{{ edit.name if edit }}" placeholder="e.g. Dubai Warehouse"></label>
+      <label>Location<input name="location" value="{{ edit.location if edit }}" placeholder="e.g. Al Quoz, Dubai"></label>
+    </div>
+    <button class="btn primary">{{ 'Update warehouse' if edit else 'Add warehouse' }}</button>
+    {% if edit %}<a class="btn light" href="{{ url_for('warehouses_page') }}">Cancel</a>{% endif %}
+  </form>
+</details>
+{% endif %}
+</div>
+{% endblock %}

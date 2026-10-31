@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% from "_perm_grid.html" import perm_grid with context %}
+{% block content %}
+<h2>Admin Panel · User setup</h2>
+{% set mine = access.get(edit.id, []) if edit else [] %}
+<div class="us-wrap">
+<form method="post" enctype="multipart/form-data" class="card us-card" id="usForm" autocomplete="off">
+  {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+  <table class="us-form">
+    <thead><tr><th colspan="3">{{ 'User setup · ' ~ edit.username if edit else 'User setup · new user' }}</th></tr></thead>
+    <tbody>
+    <tr><td>User Name *</td>
+      <td><input name="full_name" required value="{{ edit.full_name if edit }}" placeholder="Full name of the person"></td><td></td></tr>
+    <tr><td>User ID *</td>
+      <td>{% if edit %}<input value="{{ edit.username }}" readonly class="ro" title="The login ID can't be changed">
+          {% else %}<input name="username" required pattern="[A-Za-z0-9._@\-]{2,30}" placeholder="Login ID, e.g. ahmed.k"
+                           title="2-30 letters, digits or . _ @ - (no spaces)">{% endif %}</td><td></td></tr>
+    <tr><td>Password{{ ' *' if not edit }}</td>
+      <td>
+        {% if edit %}
+        <div id="pwShow"><span class="muted">••••••••</span>
+          <span class="muted small">· changed {{ edit.pw_changed_at or 'before records' }}</span></div>
+        {% endif %}
+        <div id="pwBox" {{ 'hidden' if edit }}>
+          <div class="us-inline"><input name="password" id="pw" type="text" minlength="{{ PW_MIN }}"
+            placeholder="{{ 'New temporary password' if edit else 'Temporary password' }}" {{ 'required' if not edit }}>
+            <button type="button" class="btn small light" id="pwGen">Generate</button></div>
+          <span class="muted small">At least {{ PW_MIN }} characters, letters with digits or symbols. Give it to the user;
+            they set their own at first login.</span>
+        </div>
+      </td>
+      <td>{% if edit %}<a href="#" id="pwReset">Reset</a>{% endif %}</td></tr>
+    <tr><td>Photo</td>
+      <td class="us-photo">{% if edit and edit.photo %}<img src="{{ edit.photo|upload_url }}" alt="">{% else %}<span class="us-avatar">{{ (edit.full_name or edit.username)[:1]|upper if edit else '?' }}</span>{% endif %}
+        <input type="file" name="photo" accept="image/*">
+        {% if edit and edit.photo %}<label class="check small"><input type="checkbox" name="remove_photo" value="1"> Remove</label>{% endif %}</td><td></td></tr>
+    <tr><td>Entities Access *</td>
+      <td class="us-checks" id="entBox">
+        {% for e in entities %}
+        <label class="check"><input type="checkbox" name="entity" value="{{ e.id }}" {{ 'checked' if e.id in mine or (not edit and loop.length == 1) }}>
+          {{ e.code }} · {{ e.name }}{% if not e.active %} <span class="muted small">(inactive)</span>{% endif %}</label>
+        {% endfor %}
+        <span class="muted small admin-note" hidden>Administrator: opens every entity.</span>
+      </td><td></td></tr>
+    <tr><td>Role *</td>
+      <td><select name="role_id" id="roleSel" required>
+          {% for r in roles %}<option value="{{ r.id }}" data-admin="{{ r.is_admin }}" data-modules="{{ r.modules }}"
+            {{ 'selected' if (edit and edit.role_id == r.id) or (not edit and r.name == 'User') }}>{{ r.name }}</option>{% endfor %}
+        </select></td>
+      <td><a class="us-plus" href="{{ url_for('admin_roles', next=request.full_path) }}" title="Add or change roles">+</a></td></tr>
+    <tr><td>Module *<br><span class="muted small" style="font-weight:400">access per function</span></td>
+      <td id="modBox">
+        <span class="muted small admin-note" hidden>Administrator: full access to every module and System administration.</span>
+        <div class="perm-wrap">{{ perm_grid(edit_perms or role_perms.get((roles|selectattr('name', 'equalto', 'User')|first or roles[0]).id)) }}</div>
+        <span class="muted small">Choosing a role fills this in; it can then be changed for this user only.</span>
+      </td><td></td></tr>
+    </tbody>
+    <tbody class="us-extra">
+    <tr><th colspan="3">Contact and security</th></tr>
+    <tr><td>Email</td><td><input name="email" type="email" value="{{ edit.email if edit }}"></td><td></td></tr>
+    <tr><td>Mobile</td><td><input name="mobile" value="{{ edit.mobile if edit }}"></td><td></td></tr>
+    <tr><td>Status</td><td><label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not edit or edit.active }}> Active (can log in)</label></td><td></td></tr>
+    <tr><td>Next login</td><td><label class="check"><input type="checkbox" name="must_change_pw" value="1" id="mustChange"
+        {{ 'checked' if not edit or edit.must_change_pw }}> Must change password at next login</label></td><td></td></tr>
+    {% if edit %}
+    <tr><td>Account lock</td><td>{% if locked_until(edit) %}<span class="bad-big">Locked</span> after {{ edit.failed_logins }} wrong passwords,
+        until {{ locked_until(edit) }} <label class="check"><input type="checkbox" name="unlock" value="1" checked> Unlock now</label>
+        {% else %}<span class="ok-big">Not locked</span> <span class="muted small">· {{ edit.failed_logins or 0 }} wrong password(s) since last login</span>{% endif %}</td><td></td></tr>
+    <tr><td>Last login</td><td>{{ edit.last_login or '-' }}</td><td></td></tr>
+    <tr><td>Created</td><td>{{ edit.created_at }}</td><td></td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+  <div class="us-foot">
+    <button class="btn primary">{{ 'Save' if edit else 'Create user' }}</button>
+    {% if edit %}<a class="btn light" href="{{ url_for('admin_users', new=1) }}">＋ New user</a>
+      <a class="btn small" href="{{ url_for('admin_logs', user=edit.username) }}">View log</a>{% endif %}
+  </div>
+</form>
+
+<div class="table-wrap us-list">
+<table class="grid">
+  <thead><tr><th></th><th>User ID</th><th>User Name</th><th>Role</th><th>Entities</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr class="{{ 'on' if edit and edit.id == u.id }}">
+      <td>{% if u.photo %}<img class="us-thumb" src="{{ u.photo|upload_url }}" alt="">{% else %}<span class="us-avatar sm">{{ (u.full_name or u.username)[:1]|upper }}</span>{% endif %}</td>
+      <td><b>{{ u.username }}</b></td><td>{{ u.full_name }}</td><td>{{ u.role_name or u.role }}</td>
+      <td>{% if u.role == 'admin' %}<span class="muted">All</span>{% else %}{% for e in entities if e.id in access.get(u.id, []) %}{{ e.code }}{{ ', ' if not loop.last }}{% else %}<span class="bad-big">None</span>{% endfor %}{% endif %}</td>
+      <td>{% if not u.active %}<span class="status Draft">Disabled</span>
+          {% elif locked_until(u) %}<span class="status Cancelled">Locked</span>
+          {% else %}<span class="status Submitted">Active</span>{% endif %}
+          {% if u.must_change_pw %}<span class="muted small" title="Must change password at next login">· 🔑</span>{% endif %}</td>
+      <td class="small">{{ u.last_login or '-' }}</td>
+      <td><a class="btn small light" href="{{ url_for('admin_users', edit=u.id) }}">Edit</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+
+<script>
+(function () {
+  const role = document.getElementById('roleSel');
+  const ROLE_PERMS = {{ role_perms|tojson }};
+  function applyRole(fill) {
+    const o = role.selectedOptions[0], admin = o.dataset.admin === '1', perms = ROLE_PERMS[o.value] || {};
+    document.querySelectorAll('#entBox input').forEach(i => { i.disabled = admin; });
+    document.querySelector('#modBox .perm-wrap').hidden = admin;
+    document.querySelectorAll('.admin-note').forEach(n => { n.hidden = !admin; });
+    if (fill) document.querySelectorAll('#modBox input[type=radio]').forEach(i => { i.checked = +i.value === (perms[i.name.slice(5)] || 0); });
+  }
+  role.addEventListener('change', () => applyRole(true));  // a new role brings its modules; ticks can then be changed
+  applyRole({{ 'false' if edit else 'true' }});
+  const reset = document.getElementById('pwReset');
+  if (reset) reset.addEventListener('click', e => {
+    e.preventDefault();
+    document.getElementById('pwBox').hidden = false;
+    document.getElementById('pwShow').hidden = true;
+    document.getElementById('mustChange').checked = true;
+    document.getElementById('pw').focus();
+  });
+  document.getElementById('pwGen').addEventListener('click', () => {
+    const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz', dig = '23456789', all = abc + dig + '@#$%';
+    const pick = s => s[crypto.getRandomValues(new Uint32Array(1))[0] % s.length];
+    let p = pick(abc) + pick(dig);
+    while (p.length < 12) p += pick(all);
+    document.getElementById('pw').value = p.split('').sort(() => crypto.getRandomValues(new Uint8Array(1))[0] - 128).join('');
+  });
+})();
+</script>
+{% endblock %}

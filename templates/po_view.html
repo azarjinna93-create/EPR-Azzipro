@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.doc_no }} · Purchase Order{% endblock %}
+{% block content %}
+{% set rows = lines or items %}
+{% set cur = doc.currency or S.currency %}
+{% set grns = chain.get('GRN', []) %}
+{% set pis = chain.get('PI', []) %}
+{% set received = rows|sum(attribute='done') if lines else 0 %}
+{% if doc.status == 'Draft' %}{% set order_status = 'Draft' %}
+{% elif open_qty > 0 and received > 0 %}{% set order_status = 'Partly received' %}
+{% elif open_qty > 0 %}{% set order_status = 'Open order' %}
+{% elif pis %}{% set order_status = 'Invoiced' %}
+{% else %}{% set order_status = 'Received' %}{% endif %}
+{% set last = history|last if history else None %}
+{% if doc.status == 'Submitted' %}{% set approval = 'Approved' %}
+{% elif doc.status == 'Pending' %}{% set approval = 'Pending approval' %}
+{% elif last and last.action == 'Rejected' %}{% set approval = 'Rejected' %}
+{% else %}{% set approval = 'Draft' %}{% endif %}
+{% set can_recall = doc.status == 'Pending' and (doc.created_by == current_user.id or current_user.role == 'admin') %}
+
+{# what this user may do here (User setup access): view-only users get no New / Edit / Submit / Receive / Invoice #}
+{% set w = url_ok(url_for('doc_form', doc_id=doc.id)) %}
+{% set editable = editable and w %}
+{% set can_recall = can_recall and w %}
+{% set grn_ok = url_ok(url_for('documents', type='GRN', new=1)) %}
+{% set pi_ok = url_ok(url_for('invoice_select', doc_type='PI')) %}
+<div class="fo-page" data-back-label="Purchase Order {{ doc.doc_no }}">
+{# Command bar + action pane (ribbon), modelled on the Dynamics purchase order page #}
+<div class="fo-pane">
+  <div class="fo-cmdbar">
+    <a class="fo-cmd" href="{{ url_for('documents', type='PO') }}" title="Back" data-nav-back>←</a>
+    {% if w %}<a class="fo-cmd" href="{{ url_for('documents', type='PO', new=1) }}">＋ New</a>{% endif %}
+    {% if editable %}<a class="fo-cmd" href="{{ url_for('doc_form', doc_id=doc.id) }}">✎ Edit</a>
+    {% else %}<span class="fo-cmd off">✎ Edit</span>{% endif %}
+    {% if current_user.role == 'admin' and not invoiced and not returned and not final %}
+    <form method="post" action="{{ url_for('doc_delete', doc_id=doc.id) }}" class="inline"
+          onsubmit="return confirm('Delete {{ doc.doc_no }}? This cannot be undone.')">
+      <button class="fo-cmd">🗑 Delete</button></form>
+    {% else %}<span class="fo-cmd off">🗑 Delete</span>{% endif %}
+    <details class="fo-menu">
+      <summary class="fo-cmd">⟳ Workflow ⌄</summary>
+      <div class="fo-menu-list">
+        {% if doc.status == 'Draft' and w %}
+        <form method="post" action="{{ url_for('doc_submit', doc_id=doc.id) }}"
+              onsubmit="return confirm('{{ 'Submit ' ~ doc.doc_no ~ ' for approval?' if po_wf_on else 'Submit ' ~ doc.doc_no ~ '? It will be approved and locked for normal users.' }}')">
+          <button class="fo-link">{{ 'Submit for approval' if po_wf_on else 'Submit (approve)' }}</button></form>
+        {% endif %}
+        {% if approvable %}
+        <button type="button" class="fo-link" onclick="document.getElementById('wfDecide').scrollIntoView({behavior: 'smooth'})">Approve / reject…</button>
+        {% endif %}
+        {% if can_recall %}
+        <form method="post" action="{{ url_for('po_recall', doc_id=doc.id) }}" onsubmit="return confirm('Recall {{ doc.doc_no }} to draft?')">
+          <button class="fo-link">Recall</button></form>
+        {% endif %}
+        <button type="button" class="fo-link" onclick="showHistory()">View history</button>
+        <a href="{{ url_for('po_approvals') }}">Approvals workspace</a>
+      </div>
+    </details>
+    <span class="fo-sep"></span>
+    {% for key, label in [('po', 'Purchase order'), ('receive', 'Receive'), ('invoice', 'Invoice'), ('general', 'General')] %}
+    <button type="button" class="fo-tab {{ 'on' if loop.first }}" data-pane="{{ key }}">{{ label }}</button>
+    {% endfor %}
+    <span class="spacer"></span>
+    <button type="button" class="fo-cmd" id="foPaneToggle" title="Show / hide the action pane">⌃</button>
+  </div>
+
+  <div class="fo-ribbon" id="foRibbon">
+    <div class="fo-panel" data-pane="po">
+      <div class="fo-group"><h4>Maintain</h4>
+        {% if editable %}<a href="{{ url_for('doc_form', doc_id=doc.id) }}">Edit order</a>{% else %}<span class="off">Edit order</span>{% endif %}
+        {% if w %}<a href="{{ url_for('documents', type='PO', new=1) }}">New purchase order</a>{% endif %}
+      </div>
+      <div class="fo-group"><h4>Actions</h4>
+        {% if doc.status == 'Draft' and w %}
+        <form method="post" action="{{ url_for('doc_submit', doc_id=doc.id) }}"
+              onsubmit="return confirm('{{ 'Submit ' ~ doc.doc_no ~ ' for approval?' if po_wf_on else 'Submit ' ~ doc.doc_no ~ '? It will be approved and locked for normal users.' }}')">
+          <button class="fo-link">{{ 'Submit for approval' if po_wf_on else 'Confirm (submit)' }}</button></form>
+        {% else %}<span class="off">{{ 'Submit for approval' if po_wf_on else 'Confirm (submit)' }}</span>{% endif %}
+        {% if can_recall %}
+        <form method="post" action="{{ url_for('po_recall', doc_id=doc.id) }}" onsubmit="return confirm('Recall {{ doc.doc_no }} to draft?')">
+          <button class="fo-link">Recall from approval</button></form>
+        {% endif %}
+      </div>
+      <div class="fo-group"><h4>Print</h4>
+        <a href="{{ url_for('doc_print', doc_id=doc.id) }}" target="_blank">Purchase order</a>
+      </div>
+      <div class="fo-group"><h4>Totals</h4>
+        <span>Net amount <b>{{ doc.subtotal|money }}</b></span>
+        <span>VAT <b>{{ doc.vat_amount|money }}</b></span>
+        <span>Total <b>{{ cur }} {{ doc.total|money }}</b></span>
+        {% if cur != BASE_CUR %}<span>= <b>{{ BASE_CUR }} {{ doc.base_total|money }}</b> @ {{ '%g'|format(doc.exchange_rate) }}</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="fo-panel" data-pane="receive" hidden>
+      <div class="fo-group"><h4>Generate</h4>
+        {% if can_next and grn_ok %}
+        <a href="{{ url_for('doc_form', doc_type='GRN', **{'from': doc.id}) }}">Goods Received Note ({{ open_qty|num }} pending)</a>
+        {% elif not grn_ok %}<span class="off" title="View-only access">Goods Received Note</span>
+        {% elif doc.status != 'Submitted' %}<span class="off" title="The order must be approved first">Goods Received Note</span>
+        {% else %}<span class="off">Fully received</span>{% endif %}
+      </div>
+      <div class="fo-group"><h4>Goods Received Notes</h4>
+        {% for c in grns %}<a href="{{ url_for('doc_view', doc_id=c.id) }}">{{ c.doc_no }}{% if c.status == 'Draft' %} (draft){% endif %}</a>
+        {% else %}<span class="off">None yet</span>{% endfor %}
+      </div>
+    </div>
+
+    <div class="fo-panel" data-pane="invoice" hidden>
+      <div class="fo-group"><h4>Generate</h4>
+        {% if pi_ok and grns|selectattr('status', 'equalto', 'Submitted')|list %}
+        <a href="{{ url_for('invoice_select', doc_type='PI') }}">Purchase invoice</a>
+        {% else %}<span class="off" title="Submit a GRN first">Purchase invoice</span>{% endif %}
+      </div>
+      <div class="fo-group"><h4>Purchase invoices</h4>
+        {% for c in pis %}<a href="{{ url_for('doc_view', doc_id=c.id) }}">{{ c.doc_no }}{% if c.status == 'Draft' %} (draft){% endif %}</a>
+        {% else %}<span class="off">None yet</span>{% endfor %}
+      </div>
+    </div>
+
+    <div class="fo-panel" data-pane="general" hidden>
+      <div class="fo-group"><h4>Vendor</h4>
+        {% if doc.customer_id %}<a href="{{ url_for('statement', kind='supplier', cid=doc.customer_id) }}">Vendor account</a>{% endif %}
+        <a href="{{ url_for('suppliers') }}">Vendor master</a>
+      </div>
+      <div class="fo-group"><h4>Inquiry</h4>
+        <a href="{{ url_for('billing_log', type='PO') }}">Transaction log</a>
+        <a href="{{ url_for('documents', type='PO') }}">All purchase orders</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fo-crumb"><a href="{{ url_for('documents', type='PO') }}">All purchase orders</a> <span>|</span> Standard view</div>
+<div class="fo-title">
+  <h1>{{ doc.doc_no }} : {% if party and party.account_no %}{{ party.account_no }} - {% endif %}{{ doc.cust_name|upper }}</h1>
+  <div class="fo-state"><span>Order status</span><b>{{ order_status }}</b></div>
+  <div class="fo-state"><span>Approval status</span><b>{{ approval }}</b></div>
+</div>
+
+{% if invoiced %}
+<div class="flash ok">🔒 Invoiced in <a href="{{ url_for('doc_view', doc_id=invoiced.id) }}"><b>{{ invoiced.doc_no }}</b></a> —
+  this Purchase Order can no longer be changed or deleted.</div>
+{% endif %}
+{% if approval == 'Rejected' %}
+<div class="flash error">✕ Rejected by <b>{{ last.full_name or last.username }}</b> at <b>{{ last.step_name }}</b> on {{ last.at }}:
+  “{{ last.remark }}”. Edit the order and submit it again.</div>
+{% elif doc.status == 'Draft' %}
+<div class="flash error">This order is a draft. Use <b>Workflow → {{ 'Submit for approval' if po_wf_on else 'Submit (approve)' }}</b>
+  {{ 'to send it for approval.' if po_wf_on else 'to approve it and enable receiving.' }}</div>
+{% endif %}
+
+{# Approval progress: the steps that apply to this PO's amount #}
+{% set applies = all_steps|selectattr('min_amount', 'le', doc.total)|list %}
+{% if (po_wf_on or doc.status == 'Pending') and applies and doc.status != 'Submitted' %}
+<div class="wf-track">
+  <span class="wf-node done">Submitted</span>
+  {% set ns = namespace(passed=true) %}
+  {% for st in applies %}
+    {% if wf_step and st.id == wf_step.id %}{% set ns.passed = false %}{% set cls = 'current' %}
+    {% elif ns.passed and doc.status == 'Pending' %}{% set cls = 'done' %}
+    {% else %}{% set cls = '' %}{% endif %}
+    <span class="wf-arrow">›</span>
+    <span class="wf-node {{ cls }}" title="Approvers: {% for u in step_approvers(st) %}{{ users.get(u, '?') }}{{ ', ' if not loop.last }}{% endfor %}">
+      {{ loop.index }}. {{ st.name }}</span>
+  {% endfor %}
+  <span class="wf-arrow">›</span><span class="wf-node">Approved</span>
+</div>
+{% endif %}
+
+{% if approvable %}
+<div class="wf-decide-box" id="wfDecide">
+  <div><b>Waiting for your approval</b> at step <b>{{ wf_step.name }}</b>
+    <span class="muted">· {{ cur }} {{ doc.total|money }} · created by {{ users.get(doc.created_by, '-') }}</span></div>
+  <form method="post" class="wf-decide-form">
+    <input name="remark" placeholder="Comment (required to reject)" aria-label="Comment">
+    <button class="btn primary" formaction="{{ url_for('po_approve', doc_id=doc.id) }}">✓ Approve</button>
+    <button class="btn danger" formaction="{{ url_for('po_reject', doc_id=doc.id) }}"
+            onclick="if (!this.form.remark.value.trim()) { alert('Write the reason for rejecting in the comment box.'); this.form.remark.focus(); return false; }">✕ Reject</button>
+  </form>
+</div>
+{% elif doc.status == 'Pending' and wf_step %}
+<div class="flash ok">⏳ Waiting for approval at <b>{{ wf_step.name }}</b>
+  ({% for u in step_approvers(wf_step) %}{{ users.get(u, '?') }}{{ ', ' if not loop.last }}{% endfor %}).
+  The order is locked until it is approved{{ ' or recalled' if can_recall }}.</div>
+{% endif %}
+
+<div class="fo-views">
+  <button type="button" class="fo-view on" data-view="lines">Lines</button>
+  <button type="button" class="fo-view" data-view="header">Header</button>
+</div>
+
+{# ------------------------------------------------------------------ Lines view #}
+<section data-view="lines">
+  <details class="fo-fast">
+    <summary>Purchase order header <span class="fo-sum">{{ doc.doc_date|ddmmyyyy }} · {{ doc.cust_name }} · {{ cur }} {{ doc.total|money }}</span></summary>
+    <div class="fo-fields">
+      <div class="fo-f"><label>Vendor</label><span>{{ doc.cust_name or '-' }}</span></div>
+      <div class="fo-f"><label>Order date</label><span>{{ doc.doc_date|ddmmyyyy }}</span></div>
+      <div class="fo-f"><label>Requested receipt date</label><span>{{ doc.receipt_date|ddmmyyyy if doc.receipt_date else '-' }}</span></div>
+      <div class="fo-f"><label>Default warehouse</label><span>{{ WAREHOUSES[doc.warehouse_id].code ~ ' · ' ~ WAREHOUSES[doc.warehouse_id].name if doc.warehouse_id in WAREHOUSES else '-' }}</span></div>
+      <div class="fo-f"><label>Supplier reference</label><span>{{ doc.lpo_no or '-' }}</span></div>
+      <div class="fo-f"><label>Kind attention</label><span>{{ doc.attention or '-' }}</span></div>
+      <div class="fo-f"><label>Delivery location</label><span>{{ doc.delivery_location or '-' }}</span></div>
+      <div class="fo-f"><label>Payment terms</label><span>{{ doc.payment_terms or '-' }}</span></div>
+    </div>
+  </details>
+
+  <details class="fo-fast" open>
+    <summary>Purchase order lines</summary>
+    <div class="fo-gridbar">
+      {% if editable %}<a href="{{ url_for('doc_form', doc_id=doc.id) }}">＋ Add / edit lines</a>{% else %}<span class="off">＋ Add / edit lines</span>{% endif %}
+      {% if can_next and grn_ok %}<a href="{{ url_for('doc_form', doc_type='GRN', **{'from': doc.id}) }}">Receive (GRN)</a>{% endif %}
+      <a href="{{ url_for('doc_print', doc_id=doc.id) }}" target="_blank">Print</a>
+      <input type="search" id="foFilter" placeholder="Filter lines" aria-label="Filter lines">
+    </div>
+    <div class="fo-gridwrap">
+    <table class="fo-grid" id="foLines">
+      <thead><tr><th class="sel"></th><th class="r">Line number</th><th>Item number</th><th>Product name</th>
+        <th class="r">Quantity</th><th>Unit</th><th>Warehouse</th><th class="r">Unit price</th><th class="r">Net amount</th>
+        <th class="r">VAT</th><th class="r">Line total</th><th class="r">Received</th><th class="r">Pending</th><th>Line status</th></tr></thead>
+      <tbody>
+      {% for l in rows %}
+        {% set done = l.done if lines else 0 %}
+        {% set pend = l.pending if lines else l.qty %}
+        {% set lstatus = 'Draft' if doc.status == 'Draft' else ('Received' if pend <= 0 else ('Partly received' if done > 0 else 'Open order')) %}
+        <tr tabindex="0" class="{{ 'on' if loop.first }}"
+            data-line='{{ {"sl": l.sl, "code": l.code or "", "title": l.title or "", "details": l.details or "",
+                           "qty": l.qty|num, "unit": l.unit or "", "rate": l.rate|money, "amount": l.amount|money,
+                           "vat": l.vat|money, "total": l.line_total|money, "done": done|num, "pending": pend|num,
+                           "status": lstatus,
+                           "wh": (WAREHOUSES[l.warehouse_id].code ~ ' · ' ~ WAREHOUSES[l.warehouse_id].name) if l.warehouse_id in WAREHOUSES else ''}|tojson|forceescape }}'>
+          <td class="sel"><span class="radio"></span></td>
+          <td class="r">{{ l.sl }}</td><td>{{ l.code or '' }}</td><td>{{ l.title }}</td>
+          <td class="r">{{ l.qty|num }}</td><td>{{ l.unit }}</td><td>{{ WAREHOUSES[l.warehouse_id].code if l.warehouse_id in WAREHOUSES else '' }}</td><td class="r">{{ l.rate|money }}{% if l|disc %}<br><span class="small muted">{{ l|disc }}</span>{% endif %}</td>
+          <td class="r">{{ l.amount|money }}</td><td class="r">{{ l.vat|money }}</td><td class="r">{{ l.line_total|money }}</td>
+          <td class="r">{{ done|num }}</td><td class="r {{ 'pending' if pend > 0 and doc.status == 'Submitted' }}">{{ pend|num }}</td>
+          <td>{{ lstatus }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="14" class="muted center">No lines</td></tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr><td></td><td></td><td></td><td class="r"><b>Totals</b></td><td class="r"><b>{{ doc.total_qty|num }}</b></td><td></td><td></td><td></td>
+        <td class="r"><b>{{ doc.subtotal|money }}</b></td><td class="r"><b>{{ doc.vat_amount|money }}</b></td>
+        <td class="r"><b>{{ doc.total|money }}</b></td><td class="r">{{ received|num }}</td><td class="r">{{ open_qty|num if lines else '' }}</td><td></td></tr></tfoot>
+    </table>
+    </div>
+  </details>
+
+  {% if rows %}
+  <details class="fo-fast" open>
+    <summary>Line details <span class="fo-sum" id="ldSum"></span></summary>
+    <div class="fo-subtabs">
+      <button type="button" class="on" data-sub="general">General</button>
+      <button type="button" data-sub="delivery">Delivery</button>
+      <button type="button" data-sub="price">Price and amounts</button>
+    </div>
+    <div class="fo-fields" data-sub="general">
+      <div class="fo-col"><h5>Product</h5>
+        <div class="fo-f"><label>Item number</label><span data-k="code"></span></div>
+        <div class="fo-f"><label>Product name</label><span data-k="title"></span></div>
+        <div class="fo-f"><label>Text</label><span data-k="details" class="pre"></span></div>
+      </div>
+      <div class="fo-col"><h5>Order line</h5>
+        <div class="fo-f"><label>Line number</label><span data-k="sl"></span></div>
+        <div class="fo-f"><label>Procurement category</label><span>Inventory items</span></div>
+      </div>
+      <div class="fo-col"><h5>Reference</h5>
+        <div class="fo-f"><label>Supplier reference</label><span>{{ doc.lpo_no or '-' }}</span></div>
+        <div class="fo-f"><label>Origin</label><span>Purchase</span></div>
+      </div>
+      <div class="fo-col"><h5>Status</h5>
+        <div class="fo-f"><label>Line status</label><span data-k="status"></span></div>
+        <div class="fo-f"><label>Approval status</label><span>{{ approval }}</span></div>
+      </div>
+    </div>
+    <div class="fo-fields" data-sub="delivery" hidden>
+      <div class="fo-col"><h5>Quantity</h5>
+        <div class="fo-f"><label>Ordered</label><span><span data-k="qty"></span> <span data-k="unit"></span></span></div>
+        <div class="fo-f"><label>Received</label><span data-k="done"></span></div>
+        <div class="fo-f"><label>Pending</label><span data-k="pending"></span></div>
+      </div>
+      <div class="fo-col"><h5>Delivery</h5>
+        <div class="fo-f"><label>Warehouse</label><span data-k="wh"></span></div>
+        <div class="fo-f"><label>Delivery location</label><span>{{ doc.delivery_location or '-' }}</span></div>
+        <div class="fo-f"><label>Mode of dispatch</label><span>{{ doc.dispatch_mode or '-' }}</span></div>
+      </div>
+    </div>
+    <div class="fo-fields" data-sub="price" hidden>
+      <div class="fo-col"><h5>Price</h5>
+        <div class="fo-f"><label>Unit price</label><span data-k="rate"></span></div>
+        <div class="fo-f"><label>Net amount</label><span data-k="amount"></span></div>
+      </div>
+      <div class="fo-col"><h5>Tax</h5>
+        <div class="fo-f"><label>VAT {{ doc.vat_rate|num }}%</label><span data-k="vat"></span></div>
+        <div class="fo-f"><label>Line total ({{ cur }})</label><span data-k="total"></span></div>
+      </div>
+    </div>
+  </details>
+  {% endif %}
+</section>
+
+{# ------------------------------------------------------------------ Header view #}
+<section data-view="header" hidden>
+  <details class="fo-fast" open>
+    <summary>Vendor</summary>
+    <div class="fo-fields">
+      <div class="fo-f"><label>Vendor account</label><span>{{ party.account_no if party and party.account_no else '-' }}</span></div>
+      <div class="fo-f"><label>Vendor name</label><span>{{ doc.cust_name or '-' }}</span></div>
+      <div class="fo-f"><label>Vendor country</label><span>{{ party.country if party and party.country else '-' }}</span></div>
+      <div class="fo-f"><label>Contact name</label><span>{{ party.contact_name if party and party.contact_name else '-' }}</span></div>
+      <div class="fo-f"><label>e-mail ID</label><span>{{ party.email if party and party.email else '-' }}</span></div>
+      <div class="fo-f"><label>Area</label><span>{{ doc.cust_area or '-' }}</span></div>
+      <div class="fo-f"><label>P.O. Box</label><span>{{ doc.cust_po_box or '-' }}</span></div>
+      <div class="fo-f"><label>Contact</label><span>{{ doc.cust_contact or '-' }}</span></div>
+      <div class="fo-f"><label>TRN</label><span>{{ doc.cust_trn or '-' }}</span></div>
+      <div class="fo-f"><label>Kind attention</label><span>{{ doc.attention or '-' }}</span></div>
+    </div>
+  </details>
+  <details class="fo-fast" open>
+    <summary>General</summary>
+    <div class="fo-fields">
+      <div class="fo-f"><label>Purchase order</label><span>{{ doc.doc_no }}</span></div>
+      <div class="fo-f"><label>Order date</label><span>{{ doc.doc_date|ddmmyyyy }}</span></div>
+      <div class="fo-f"><label>Requested receipt date</label><span>{{ doc.receipt_date|ddmmyyyy if doc.receipt_date else '-' }}</span></div>
+      <div class="fo-f"><label>Supplier reference</label><span>{{ doc.lpo_no or '-' }}</span></div>
+      <div class="fo-f"><label>Order status</label><span>{{ order_status }}</span></div>
+      <div class="fo-f"><label>Approval status</label><span>{{ approval }}</span></div>
+    </div>
+  </details>
+  <details class="fo-fast" open>
+    <summary>Delivery and payment</summary>
+    <div class="fo-fields">
+      <div class="fo-f"><label>Default warehouse</label><span>{{ WAREHOUSES[doc.warehouse_id].code ~ ' · ' ~ WAREHOUSES[doc.warehouse_id].name if doc.warehouse_id in WAREHOUSES else '-' }}</span></div>
+      <div class="fo-f"><label>Delivery location</label><span>{{ doc.delivery_location or '-' }}</span></div>
+      <div class="fo-f"><label>Mode of dispatch</label><span>{{ doc.dispatch_mode or '-' }}</span></div>
+      <div class="fo-f"><label>Payment terms</label><span>{{ doc.payment_terms or '-' }}</span></div>
+      {% if doc.notes %}<div class="fo-f"><label>Notes</label><span class="pre">{{ doc.notes }}</span></div>{% endif %}
+    </div>
+  </details>
+  <details class="fo-fast" open>
+    <summary>Totals</summary>
+    <div class="fo-fields">
+      <div class="fo-f"><label>Total quantity</label><span>{{ doc.total_qty|num }}</span></div>
+      <div class="fo-f"><label>Net amount</label><span>{{ doc.subtotal|money }}</span></div>
+      {% if doc.discount_amount %}<div class="fo-f"><label>Discount{% if doc.discount_type == 'percent' %} ({{ doc.discount_value|num }}%){% endif %}</label><span>-{{ doc.discount_amount|money }}</span></div>{% endif %}
+      <div class="fo-f"><label>VAT {{ doc.vat_rate|num }}%</label><span>{{ doc.vat_amount|money }}</span></div>
+      <div class="fo-f"><label>Grand total</label><span><b>{{ cur }} {{ doc.total|money }}</b></span></div>
+      <div class="fo-f"><label>Currency</label><span>{{ cur }}{{ ' · ' ~ CURRENCIES[cur].name if cur in CURRENCIES }}</span></div>
+      {% if cur != BASE_CUR %}
+      <div class="fo-f"><label>Exchange rate ({{ BASE_CUR }} per 1 {{ cur }})</label><span>{{ '%g'|format(doc.exchange_rate) }}</span></div>
+      <div class="fo-f"><label>Total in {{ BASE_CUR }}</label><span><b>{{ BASE_CUR }} {{ doc.base_total|money }}</b></span></div>
+      {% endif %}
+    </div>
+  </details>
+  <details class="fo-fast">
+    <summary>Related documents and history</summary>
+    <div class="fo-fields">
+      <div class="fo-f"><label>Goods Received Notes</label><span>{% for c in grns %}<a href="{{ url_for('doc_view', doc_id=c.id) }}">{{ c.doc_no }}</a>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</span></div>
+      <div class="fo-f"><label>Purchase invoices</label><span>{% for c in pis %}<a href="{{ url_for('doc_view', doc_id=c.id) }}">{{ c.doc_no }}</a>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</span></div>
+      <div class="fo-f"><label>Created</label><span>{{ users.get(doc.created_by, '-') }} · {{ doc.created_at }}</span></div>
+      {% if doc.submitted_at %}<div class="fo-f"><label>Submitted</label><span>{{ users.get(doc.submitted_by, '-') }} · {{ doc.submitted_at }}</span></div>{% endif %}
+      {% if doc.updated_at %}<div class="fo-f"><label>Last edited</label><span>{{ users.get(doc.updated_by, '-') }} · {{ doc.updated_at }}</span></div>{% endif %}
+    </div>
+  </details>
+  <details class="fo-fast" id="wfHistory" {{ 'open' if history }}>
+    <summary>Workflow history <span class="fo-sum">{{ history|length }} action(s)</span></summary>
+    <div class="fo-gridwrap">
+    <table class="fo-grid">
+      <thead><tr><th>Date and time</th><th>Action</th><th>Step</th><th>By</th><th>Comment</th></tr></thead>
+      <tbody>
+      {% for h in history|reverse %}
+        <tr><td>{{ h.at }}</td><td><span class="wf-act {{ h.action }}">{{ h.action }}</span></td><td>{{ h.step_name or '-' }}</td>
+          <td>{{ h.full_name or h.username }}</td><td class="wf-remark">{{ h.remark }}</td></tr>
+      {% else %}
+        <tr><td colspan="5" class="muted center">No workflow actions yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+</section>
+
+</div>
+
+<script>
+function showHistory() {
+  document.querySelector('.fo-view[data-view="header"]').click();
+  const h = document.getElementById('wfHistory');
+  h.open = true;
+  h.scrollIntoView({behavior: 'smooth'});
+}
+(function () {
+  const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
+  document.addEventListener('click', e => {
+    document.querySelectorAll('details.fo-menu[open]').forEach(m => { if (!m.contains(e.target)) m.open = false; });
+  });
+  // Action pane tabs
+  $$('.fo-tab').forEach(t => t.addEventListener('click', () => {
+    $$('.fo-tab').forEach(x => x.classList.toggle('on', x === t));
+    $$('.fo-panel').forEach(p => p.hidden = p.dataset.pane !== t.dataset.pane);
+    document.getElementById('foRibbon').hidden = false;
+  }));
+  document.getElementById('foPaneToggle').addEventListener('click', () => {
+    const r = document.getElementById('foRibbon'); r.hidden = !r.hidden;
+  });
+  // Lines / Header
+  $$('.fo-view').forEach(b => b.addEventListener('click', () => {
+    $$('.fo-view').forEach(x => x.classList.toggle('on', x === b));
+    $$('section[data-view]').forEach(s => s.hidden = s.dataset.view !== b.dataset.view);
+  }));
+  // Line details sub-tabs
+  $$('.fo-subtabs button').forEach(b => b.addEventListener('click', () => {
+    $$('.fo-subtabs button').forEach(x => x.classList.toggle('on', x === b));
+    $$('.fo-fields[data-sub]').forEach(f => f.hidden = f.dataset.sub !== b.dataset.sub);
+  }));
+  // Selecting a line fills Line details
+  const rows = $$('#foLines tbody tr[data-line]');
+  function pick(tr) {
+    rows.forEach(r => r.classList.toggle('on', r === tr));
+    const d = JSON.parse(tr.dataset.line);
+    $$('[data-k]').forEach(el => el.textContent = d[el.dataset.k] === '' ? '-' : d[el.dataset.k]);
+    const s = document.getElementById('ldSum');
+    if (s) s.textContent = 'Line ' + d.sl + ' · ' + d.title;
+  }
+  rows.forEach(tr => {
+    tr.addEventListener('click', () => pick(tr));
+    tr.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' && tr.nextElementSibling) { e.preventDefault(); tr.nextElementSibling.focus(); pick(tr.nextElementSibling); }
+      if (e.key === 'ArrowUp' && tr.previousElementSibling) { e.preventDefault(); tr.previousElementSibling.focus(); pick(tr.previousElementSibling); }
+    });
+  });
+  if (rows.length) pick(rows[0]);
+  // Quick filter
+  const f = document.getElementById('foFilter');
+  if (f) f.addEventListener('input', () => {
+    const q = f.value.toLowerCase();
+    rows.forEach(r => r.hidden = q && !r.textContent.toLowerCase().includes(q));
+  });
+})();
+</script>
+{% endblock %}

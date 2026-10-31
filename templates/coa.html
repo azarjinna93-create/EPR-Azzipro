@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Chart of Accounts</h2>
+{% if current_user.role == 'admin' %}
+<form method="post" class="card">
+  <h3>{{ 'Edit account ' ~ edit.code if edit else 'Add account / group' }}</h3>
+  {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+  <div class="row">
+    <label>Code *<input name="code" required value="{{ edit.code if edit }}" placeholder="e.g. 5910"></label>
+    <label style="flex:2">Name *<input name="name" required value="{{ edit.name if edit }}"></label>
+    <label>Under group
+      <select name="parent_id" {{ 'disabled' if edit and edit.system_key }}>
+        <option value="">— top level —</option>
+        {% for gr in groups %}<option value="{{ gr.id }}" {{ 'selected' if edit and edit.parent_id == gr.id }}>{{ gr.code }} {{ gr.name }}</option>{% endfor %}
+      </select></label>
+    <label>Type (top level only)
+      <select name="type" {{ 'disabled' if edit and edit.system_key }}>
+        {% for t in types %}<option {{ 'selected' if edit and edit.type == t }}>{{ t }}</option>{% endfor %}
+      </select></label>
+  </div>
+  {% if edit %}<label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if edit.active }}> Active</label>
+  {% else %}<label class="check"><input type="checkbox" name="is_group" value="1"> This is a group (holds other accounts)</label>{% endif %}
+  <button class="btn primary">{{ 'Update' if edit else 'Add' }}</button>
+  {% if edit %}<a class="btn light" href="{{ url_for('coa') }}">Cancel</a>{% endif %}
+  <p class="muted small">Accounts marked ⚙ are used by automatic posting; their type and group are fixed, but you can rename them.
+    An account placed under a group takes the group's type.</p>
+</form>
+{% endif %}
+
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Code</th><th>Account</th><th>Type</th><th class="r">Balance</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'coa-group' if r.is_group }}">
+      <td>{{ r.code }}</td>
+      <td style="padding-left:{{ 10 + r.depth * 22 }}px">{{ r.name }}{% if r.system_key %} <span title="Used by automatic posting">⚙</span>{% endif %}
+        {% if not r.active %}<span class="status Draft">inactive</span>{% endif %}</td>
+      <td class="small">{{ r.type }}{{ ' group' if r.is_group }}</td>
+      <td class="r">{% if r.is_group %}<b>{{ bal[r.id]|drcr }}</b>{% else %}<a href="{{ url_for('account_ledger', aid=r.id) }}">{{ bal[r.id]|drcr }}</a>{% endif %}</td>
+      <td class="nowrap">{% if not r.is_group %}<a class="btn small light" href="{{ url_for('account_ledger', aid=r.id) }}">Ledger</a>{% endif %}
+        {% if current_user.role == 'admin' %}<a class="btn small light" href="{{ url_for('coa', edit=r.id) }}">Edit</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

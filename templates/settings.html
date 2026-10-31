@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% macro field(key, label, type='text') %}
+  <label>{{ label }}<input type="{{ type }}" name="{{ key }}" value="{{ S[key] }}"></label>
+{% endmacro %}
+{% macro area(key, label, rows=4) %}
+  <label>{{ label }}<textarea name="{{ key }}" rows="{{ rows }}">{{ S[key] }}</textarea></label>
+{% endmacro %}
+{% block content %}
+<h2>Settings · {{ ENTITY.code }} · {{ ENTITY.name }}</h2>
+<p class="muted">These settings belong to this business entity only. Switch entity to change another one's.</p>
+<form method="post" enctype="multipart/form-data">
+  <div class="two-col">
+    <fieldset class="card">
+      <legend>Company (print header)</legend>
+      {{ field('company_name', 'Company name') }}
+      <label>Company name (Arabic)<input name="company_name_ar" value="{{ S.company_name_ar }}" dir="rtl"></label>
+      {{ area('address_lines', 'Address (one line per row)') }}
+      {{ field('trn', 'TRN No') }}
+    </fieldset>
+    <fieldset class="card">
+      <legend>Logo &amp; Stamp</legend>
+      <label>Logo image (header)<input type="file" name="logo" accept="image/*"></label>
+      {% if S.logo %}<p><img class="preview" src="{{ S.logo|upload_url }}" alt="logo">
+        <label class="check"><input type="checkbox" name="remove_logo" value="1"> Remove logo</label></p>{% endif %}
+      <label>Stamp / signature image (Authorized Signatory)<input type="file" name="stamp" accept="image/*"></label>
+      {% if S.stamp %}<p><img class="preview" src="{{ S.stamp|upload_url }}" alt="stamp">
+        <label class="check"><input type="checkbox" name="remove_stamp" value="1"> Remove stamp</label></p>{% endif %}
+    </fieldset>
+    <fieldset class="card">
+      <legend>Bank details</legend>
+      {{ field('bank_iban', 'IBAN') }}
+      {{ field('bank_bic', 'BIC / SWIFT') }}
+      {{ field('bank_name', 'Bank & branch') }}
+    </fieldset>
+    <fieldset class="card">
+      <legend>Footer</legend>
+      {{ area('footer_note', 'Note (tolerance text)', 3) }}
+      {{ area('footer_address', 'Footer address', 4) }}
+      <div class="row">{{ field('email', 'Email') }}{{ field('website', 'Website') }}</div>
+      <div class="row">{{ field('phone', 'Phone') }}{{ field('mobile', 'Mobile') }}</div>
+    </fieldset>
+    <fieldset class="card">
+      <legend>Numbering</legend>
+      <div class="row">{{ field('so_prefix', 'Sales Order prefix') }}{{ field('so_next', 'Next SO number', 'number') }}</div>
+      <div class="row">{{ field('dn_prefix', 'Delivery Note prefix') }}{{ field('dn_next', 'Next DO number', 'number') }}</div>
+      <div class="row">{{ field('inv_prefix', 'Invoice prefix') }}{{ field('inv_next', 'Next Invoice number', 'number') }}</div>
+      <div class="row">{{ field('po_prefix', 'Purchase Order prefix') }}{{ field('po_next', 'Next PO number', 'number') }}</div>
+      <div class="row">{{ field('grn_prefix', 'GRN prefix') }}{{ field('grn_next', 'Next GRN number', 'number') }}</div>
+      <div class="row">{{ field('pi_prefix', 'Purchase Invoice prefix') }}{{ field('pi_next', 'Next PI number', 'number') }}</div>
+      <div class="row">{{ field('sr_prefix', 'Credit Note prefix') }}{{ field('sr_next', 'Next Credit Note number', 'number') }}</div>
+      <div class="row">{{ field('pr_prefix', 'Debit Note prefix') }}{{ field('pr_next', 'Next Debit Note number', 'number') }}</div>
+      <div class="row">{{ field('rv_prefix', 'Receipt voucher prefix') }}{{ field('rv_next', 'Next receipt number', 'number') }}</div>
+      <div class="row">{{ field('pv_prefix', 'Payment voucher prefix') }}{{ field('pv_next', 'Next payment number', 'number') }}</div>
+      <div class="row">{{ field('jv_prefix', 'Journal voucher prefix') }}{{ field('jv_next', 'Next journal number', 'number') }}</div>
+      <div class="row">{{ field('se_prefix', 'Stock entry prefix') }}{{ field('se_next', 'Next stock entry number', 'number') }}</div>
+      <div class="row">{{ field('item_prefix', 'Product code prefix') }}{{ field('item_next', 'Next product number', 'number') }}</div>
+      <p class="muted small">Example: prefix SALT + number 677 prints as "SALT 000677".</p>
+    </fieldset>
+    <fieldset class="card">
+      <legend>Defaults</legend>
+      <div class="row">{{ field('currency', 'Currency') }}{{ field('vat_rate', 'VAT %', 'number') }}</div>
+      {{ field('default_payment_terms', 'Payment terms') }}
+      {{ field('default_payment_resp', 'Payment note') }}
+      {{ field('default_dispatch', 'Mode of dispatch') }}
+    </fieldset>
+  </div>
+  <div class="actions sticky"><button class="btn primary">Save Settings</button></div>
+</form>
+{% endblock %}

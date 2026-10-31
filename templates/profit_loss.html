@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% macro amount(v, strong=False) -%}
+  {%- set txt = ('(' ~ (-v)|money ~ ')') if v < 0 else v|money -%}
+  {%- if strong %}<b>{{ txt }}</b>{% else %}{{ txt }}{% endif -%}
+{%- endmacro %}
+{% macro section(title, key, total_label) %}
+  <tr class="coa-group"><td colspan="{{ 3 if prev else 2 }}">{{ title }}</td></tr>
+  {% for a in pl.sections[key] %}
+  <tr><td style="padding-left:32px"><a href="{{ url_for('account_ledger', aid=a.id, **{'from': d_from, 'to': d_to}) }}">{{ a.code }} {{ a.name }}</a></td>
+    <td class="r">{{ amount(a.amount) }}</td>
+    {% if prev %}<td class="r muted">{{ amount(prev.by_id.get(a.id, 0)) }}</td>{% endif %}</tr>
+  {% else %}
+  <tr><td style="padding-left:32px" class="muted small" colspan="{{ 3 if prev else 2 }}">none</td></tr>
+  {% endfor %}
+  <tr class="pl-sub"><td>{{ total_label }}</td><td class="r">{{ amount(pl.totals[key], True) }}</td>
+    {% if prev %}<td class="r muted">{{ amount(prev.totals[key]) }}</td>{% endif %}</tr>
+{% endmacro %}
+{% block content %}
+<h2>Profit &amp; Loss Account</h2>
+<p class="muted">{{ S.company_name }} · {% if d_from or d_to %}{{ d_from|ddmmyyyy or 'start' }} to {{ d_to|ddmmyyyy or 'today' }}{% else %}all dates{% endif %}
+  · {{ S.currency }}</p>
+
+<form class="filters" method="get">
+  {% for k, v in [('month', 'This month'), ('last_month', 'Last month'), ('year', 'This year'), ('all', 'All time')] %}
+    <a class="btn small {{ 'primary' if preset == k else 'light' }}" href="{{ url_for('profit_loss', p=k, compare=1 if compare else None) }}">{{ v }}</a>
+  {% endfor %}
+  <label class="inline-label">From <input type="date" name="from" value="{{ d_from }}"></label>
+  <label class="inline-label">To <input type="date" name="to" value="{{ d_to }}"></label>
+  <label class="check"><input type="checkbox" name="compare" value="1" {{ 'checked' if compare }}> Compare with previous period</label>
+  <button class="btn">Show</button>
+  <span class="spacer"></span>
+  <button type="button" class="btn" onclick="window.print()">🖨 Print</button>
+</form>
+
+<div class="stats">
+  <div class="stat card"><span>Revenue</span><b>{{ amount(pl.totals.revenue) }}</b></div>
+  <div class="stat card"><span>Gross Profit{% if pl.gross_pct is not none %} · {{ pl.gross_pct }}%{% endif %}</span><b>{{ amount(pl.gross) }}</b></div>
+  <div class="stat card"><span>Expenses</span><b>{{ amount(pl.totals.expenses) }}</b></div>
+  <div class="stat card pl-net {{ 'loss' if pl.net < 0 }}"><span>Net {{ 'Loss' if pl.net < 0 else 'Profit' }}{% if pl.net_pct is not none %} · {{ pl.net_pct }}%{% endif %}</span>
+    <b>{{ amount(pl.net) }}</b></div>
+</div>
+
+<div class="table-wrap pl">
+<table class="grid">
+  <thead><tr><th>Particulars</th><th class="r" style="width:180px">This period</th>
+    {% if prev %}<th class="r" style="width:180px">Previous<br><span class="small">{{ prev.d_from|ddmmyyyy }} – {{ prev.d_to|ddmmyyyy }}</span></th>{% endif %}</tr></thead>
+  <tbody>
+    {{ section('Revenue', 'revenue', 'Net Revenue') }}
+    {{ section('Cost of Sales', 'cost', 'Total Cost of Sales') }}
+    <tr class="pl-total"><td>GROSS PROFIT{% if pl.gross_pct is not none %} <span class="small muted">({{ pl.gross_pct }}% of revenue)</span>{% endif %}</td>
+      <td class="r">{{ amount(pl.gross, True) }}</td>{% if prev %}<td class="r muted">{{ amount(prev.gross) }}</td>{% endif %}</tr>
+    {{ section('Other Income', 'other_income', 'Total Other Income') }}
+    {{ section('Operating Expenses', 'expenses', 'Total Operating Expenses') }}
+    <tr class="pl-total pl-final {{ 'loss' if pl.net < 0 }}"><td>NET {{ 'LOSS' if pl.net < 0 else 'PROFIT' }}{% if pl.net_pct is not none %}
+      <span class="small">({{ pl.net_pct }}% of revenue)</span>{% endif %}</td>
+      <td class="r">{{ amount(pl.net, True) }}</td>{% if prev %}<td class="r">{{ amount(prev.net) }}</td>{% endif %}</tr>
+  </tbody>
+</table>
+</div>
+<p class="muted small">Revenue = Sales − Sales Returns (net of discounts, excluding VAT). Cost of Sales = Cost of Goods Sold at average cost,
+  inventory adjustments and purchase price variance. Expenses come from Journal Vouchers. Amounts in (brackets) are negative.</p>
+{% endblock %}

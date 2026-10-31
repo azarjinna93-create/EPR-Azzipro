@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ 'Admin Panel · Credit / Debit Note Approvals' if admin_view else 'My Credit / Debit Note Requests' }}</h2>
+{% if not admin_view %}<p class="muted">Ask from an invoice page (Request Credit Note / Debit Note). When an admin approves, post the note from here.</p>{% endif %}
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Requested</th>{% if admin_view %}<th>User</th>{% endif %}<th>Type</th><th>Invoice</th><th>Customer / Supplier</th>
+    {% if admin_view %}<th class="r">Invoice total</th>{% endif %}<th>Reason</th><th>Status</th><th>Admin remark</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td class="nowrap small">{{ r.created_at }}</td>
+      {% if admin_view %}<td><b>{{ r.username }}</b></td>{% endif %}
+      <td><span class="tag {{ r.doc_type }}">{{ DOC_TYPES[r.doc_type] }}</span></td>
+      <td><a href="{{ url_for('doc_view', doc_id=r.invoice_id) }}">{{ r.invoice_no }}</a></td>
+      <td>{{ r.cust_name }}</td>
+      {% if admin_view %}<td class="r">{{ r.invoice_total|money }}</td>{% endif %}
+      <td>{{ r.reason }}</td>
+      <td><span class="status {{ r.status }}">{{ r.status }}</span>
+        {% if r.admin_name %}<br><span class="muted small">by {{ r.admin_name }} · {{ r.decided_at }}</span>{% endif %}</td>
+      <td class="small">{{ r.admin_remark }}</td>
+      <td class="nowrap">
+        {% if admin_view and r.status == 'Pending' %}
+          <form method="post" action="{{ url_for('approval_decide', rid=r.id) }}" class="decide">
+            <input name="remark" placeholder="Remark (optional)">
+            <button class="btn small primary" name="decision" value="Approved">✓ Approve</button>
+            <button class="btn small danger" name="decision" value="Rejected" onclick="return confirm('Reject this request?')">✕ Reject</button>
+          </form>
+        {% elif r.status == 'Used' and r.note_no %}
+          <a href="{{ url_for('doc_view', doc_id=r.note_id) }}">{{ r.note_no }}</a>
+        {% elif not admin_view and r.status == 'Approved' %}
+          <a class="btn small primary" href="{{ url_for('doc_form', doc_type=r.doc_type, **{'from': r.invoice_id}) }}">Post {{ DOC_TYPES[r.doc_type] }}</a>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10" class="muted center">No requests yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

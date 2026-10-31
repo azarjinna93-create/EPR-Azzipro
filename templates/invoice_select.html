@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+{% set party_word = 'supplier' if doc_type == 'PI' else 'customer' %}
+<h2>New {{ DOC_TYPES[doc_type] }} — choose {{ DOC_TYPES[src_type] }}s</h2>
+<p class="muted">Tick one or more submitted {{ DOC_TYPES[src_type] }}s that are not invoiced yet. They must all be for the same {{ party_word }};
+  their lines are combined into one {{ DOC_TYPES[doc_type] }}.</p>
+
+<form class="filters" method="get">
+  {% if pre %}<input type="hidden" name="from" value="{{ pre }}">{% endif %}
+  <input name="q" value="{{ q }}" placeholder="Search no., {{ party_word }}{{ ', supplier DO' if doc_type == 'PI' }}">
+  <button class="btn">Search</button>
+</form>
+<form method="get" action="{{ url_for('doc_form', doc_type=doc_type) }}" id="pick">
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th></th><th>{{ DOC_TYPES[src_type] }}</th><th>Date</th><th>{{ party_word|title }}</th><th>{{ 'Supplier Ref' if doc_type == 'PI' else 'LPO' }}</th>
+    {% if doc_type == 'PI' %}<th>Supplier DO No</th><th>DO Date</th>{% endif %}
+    <th>Items</th><th class="r">Qty</th><th class="r">Value</th><th class="r">VAT</th><th class="r">Total</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><input type="checkbox" name="from" value="{{ r.id }}" data-party="{{ party(r) }}" {{ 'checked' if r.id == pre }}
+                 data-sub="{{ r.subtotal or 0 }}" data-disc="{{ r.discount_amount or 0 }}" data-rate="{{ r.vat_rate or 0 }}"></td>
+      <td><a href="{{ url_for('doc_view', doc_id=r.id) }}"><b>{{ r.doc_no }}</b></a></td>
+      <td>{{ r.doc_date|ddmmyyyy }}</td><td>{{ r.cust_name }}</td><td>{{ r.lpo_no }}</td>
+      {% if doc_type == 'PI' %}<td><b>{{ r.supplier_do_no }}</b></td><td>{{ r.supplier_do_date|ddmmyyyy }}</td>{% endif %}
+      <td class="small">{{ r.item_names }}</td>
+      <td class="r">{{ r.total_qty|num }}</td><td class="r">{{ r.subtotal|money }}</td>
+      <td class="r">{{ r.vat_amount|money }}</td><td class="r">{{ r.total|money }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="12" class="muted center">No submitted {{ DOC_TYPES[src_type] }}s waiting for an invoice.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<table class="totals" id="selTotals">
+  <tr><td>Selected</td><td class="r" id="tCount">0</td></tr>
+  <tr><td>Total Value</td><td class="r" id="tSub">0.00</td></tr>
+  <tr id="tDiscRow" hidden><td>Less Discount</td><td class="r" id="tDisc">0.00</td></tr>
+  <tr id="tTaxRow" hidden><td>Taxable Amount</td><td class="r" id="tTax">0.00</td></tr>
+  <tr><td>VAT <span id="tRate"></span></td><td class="r" id="tVat">0.00</td></tr>
+  <tr class="grand"><td>Grand Total {{ S.currency }}</td><td class="r" id="tTot">0.00</td></tr>
+</table>
+<div class="actions sticky">
+  <button class="btn primary" id="go" disabled>Create {{ DOC_TYPES[doc_type] }} from selected (<span id="n">0</span>)</button>
+  <a class="btn light" href="{{ url_for('documents', type=src_type) }}">Cancel</a>
+  <span class="muted small" id="hint"></span>
+</div>
+</form>
+
+<script>
+// Only documents of one customer / supplier can be ticked together
+const boxes = [...document.querySelectorAll('#pick input[name=from]')];
+function sync() {
+  const on = boxes.filter(b => b.checked);
+  const party = on.length ? on[0].dataset.party : null;
+  boxes.forEach(b => {
+    b.disabled = party !== null && b.dataset.party !== party;
+    b.closest('tr').classList.toggle('dim', b.disabled);
+  });
+  document.getElementById('n').textContent = on.length;
+  document.getElementById('go').disabled = !on.length;
+  document.getElementById('hint').textContent = on.length ? 'Other {{ party_word }}s are greyed out.' : '';
+  totals(on);
+}
+// Same maths as the invoice: discounts come off first, then VAT on the combined taxable amount
+const round2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
+const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+function totals(on) {
+  const sum = k => round2(on.reduce((t, b) => t + (+b.dataset[k]), 0));
+  const sub = sum('sub'), disc = sum('disc'), taxable = round2(sub - disc);
+  // the invoice takes its VAT % from the first (lowest numbered) document chosen
+  const first = on.reduce((a, b) => (!a || +b.value < +a.value ? b : a), null);
+  const rate = first ? +first.dataset.rate : 0;
+  const mixed = new Set(on.map(b => +b.dataset.rate)).size > 1;
+  const vat = round2(taxable * rate / 100);
+  const set = (id, v) => document.getElementById(id).textContent = fmt(v);
+  document.getElementById('tCount').textContent = on.length;
+  set('tSub', sub); set('tDisc', -disc); set('tTax', taxable); set('tVat', vat); set('tTot', taxable + vat);
+  document.getElementById('tRate').textContent = first ? rate + '%' + (mixed ? ' (rates differ — check on the invoice)' : '') : '';
+  document.getElementById('tDiscRow').hidden = document.getElementById('tTaxRow').hidden = !disc;
+}
+boxes.forEach(b => b.onchange = sync);
+sync();
+</script>
+{% endblock %}

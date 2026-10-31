@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Fiscal calendar - Azzi Soft{% endblock %}
+{% block content %}
+<h2>Fiscal calendar · {{ ENTITY.code }}</h2>
+<p class="muted">Every entry is checked against the period of its date: it can be saved, posted, approved, cancelled or deleted
+  only while that period is <b>Open</b> and its module is not on hold. <b>On hold</b> stops entries until it is lifted;
+  <b>Closed</b> is permanent. Dates outside the calendar are refused, so create the next fiscal year before it starts.</p>
+
+<div class="actions fy-tabs">
+  {% for y in years %}<a class="btn small {{ 'primary' if year and y.id == year.id else 'light' }}" href="{{ url_for('fiscal_calendar', year=y.id) }}"
+     title="{{ y.start_date|ddmmyyyy }} - {{ y.end_date|ddmmyyyy }}">{{ y.name }}</a>{% endfor %}
+  <form method="post" class="inline fy-add" onsubmit="return confirm('Create a fiscal year of 12 monthly periods from ' + this.start_date.value + '?')">
+    <input type="hidden" name="action" value="add_year">
+    <input name="name" placeholder="Name, e.g. FY{{ next_start[:4] }}" aria-label="Fiscal year name">
+    <input type="date" name="start_date" value="{{ next_start }}" aria-label="First day" required>
+    <button class="btn small">＋ New fiscal year</button>
+  </form>
+</div>
+
+{% if year %}
+<form method="post" id="fyForm">
+  <input type="hidden" name="year_id" value="{{ year.id }}">
+  <div class="fy-head">
+    <h3>{{ year.name }} <span class="muted small">{{ year.start_date|ddmmyyyy }} – {{ year.end_date|ddmmyyyy }}</span></h3>
+    <span class="muted small">Set all open periods:</span>
+    <button type="button" class="btn small light" data-all="Open">Open</button>
+    <button type="button" class="btn small light" data-all="On hold">On hold</button>
+    <button type="button" class="btn small light" data-holds="0">Lift module holds</button>
+  </div>
+  <div class="table-wrap">
+  <table class="grid fy-grid">
+    <thead>
+      <tr><th rowspan="2">Period</th><th rowspan="2">From</th><th rowspan="2">To</th><th rowspan="2">Status</th>
+        <th colspan="{{ pmods|length }}" class="center">Module on hold</th><th rowspan="2">Changed</th></tr>
+      <tr>{% for key, name in pmods %}<th class="center">{{ name }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+    {% for p in periods %}
+      {% set closed = p.status == 'Closed' %}
+      <tr class="fy-{{ p.status|replace(' ', '-')|lower }}{{ ' fy-now' if p.start_date <= today <= p.end_date }}">
+        <td><b>{{ p.name }}</b>{% if p.start_date <= today <= p.end_date %} <span class="muted small">(current)</span>{% endif %}</td>
+        <td>{{ p.start_date|ddmmyyyy }}</td><td>{{ p.end_date|ddmmyyyy }}</td>
+        <td>{% if closed %}<span class="status Cancelled">Closed</span>
+          {% else %}<select name="status_{{ p.id }}" class="fy-status" data-was="{{ p.status }}" aria-label="Status of {{ p.name }}">
+            {% for st in statuses %}<option {{ 'selected' if st == p.status }}>{{ st }}</option>{% endfor %}</select>{% endif %}</td>
+        {% for key, name in pmods %}
+        <td class="center"><input type="checkbox" name="hold_{{ key }}_{{ p.id }}" value="1" class="fy-hold" {{ 'checked' if p['hold_' ~ key] }}
+          {{ 'disabled' if closed }} aria-label="{{ name }} on hold in {{ p.name }}"></td>
+        {% endfor %}
+        <td class="small muted">{{ p.username or '' }} {{ p.updated_at or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <button class="btn primary">Save periods</button>
+</form>
+<script>
+(function () {
+  const form = document.getElementById('fyForm');
+  form.querySelectorAll('[data-all]').forEach(b => b.addEventListener('click', () =>
+    form.querySelectorAll('.fy-status').forEach(s => { s.value = b.dataset.all; })));
+  form.querySelector('[data-holds]').addEventListener('click', () => form.querySelectorAll('.fy-hold:not(:disabled)').forEach(c => { c.checked = false; }));
+  form.addEventListener('submit', e => {
+    const closing = [...form.querySelectorAll('.fy-status')].filter(s => s.value === 'Closed' && s.dataset.was !== 'Closed');
+    if (closing.length && !confirm(`Close ${closing.length} period(s) permanently? A closed period can never be opened again.`)) e.preventDefault();
+  });
+})();
+</script>
+{% else %}
+<p class="muted">No fiscal calendar yet: entries are not checked against periods until a fiscal year is created.</p>
+{% endif %}
+{% endblock %}

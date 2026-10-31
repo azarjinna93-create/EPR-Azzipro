@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+{% set priced = doc.doc_type not in UNPRICED %}
+{% set purchase = doc.doc_type in PURCHASE_FLOW %}
+{% set titles = {'SO': 'SALES ORDER', 'DN': 'DELIVERY NOTE', 'INV': 'TAX INVOICE', 'SR': 'TAX CREDIT NOTE',
+                 'PO': 'PURCHASE ORDER', 'GRN': 'GOODS RECEIVED NOTE', 'PI': 'PURCHASE INVOICE', 'PR': 'DEBIT NOTE'} %}
+{% set nolabel = {'SO': 'SO No', 'DN': 'DO No', 'INV': 'Invoice No', 'SR': 'Credit Note No', 'PO': 'PO No', 'GRN': 'GRN No',
+                  'PI': 'PI No', 'PR': 'Debit Note No'}[doc.doc_type] %}
+{% set datelabel = {'SO': 'SO Date', 'DN': 'DO Date', 'INV': 'Invoice Date', 'SR': 'Credit Note Date', 'PO': 'PO Date',
+                    'GRN': 'GRN Date', 'PI': 'PI Date', 'PR': 'Debit Note Date'}[doc.doc_type] %}
+{# Purchase documents have no bank block / tolerance note, so the item area gets that space #}
+{% set extra = 30 if purchase else 0 %}
+{# the supplier DO lines (2 on a GRN, 1 on a Purchase Invoice) take that much from the item area #}
+{% set extra = extra - {'GRN': 10, 'PI': 6, 'SR': 5, 'PR': 5}.get(doc.doc_type, 0) %}
+<title>{{ doc.doc_no }} - {{ titles[doc.doc_type] }}</title>
+<style>
+  @page { size: A4; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #e9e9e9; font-family: Arial, Helvetica, sans-serif; color: #000; font-size: 11px; }
+  .page { width: 194mm; margin: 10px auto; background: #fff; padding: 0; position: relative; }
+  .sheet { border: 1.5px solid #000; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { vertical-align: top; }
+  .b { font-weight: bold; }
+  .bt { border-top: 1.5px solid #000; }
+  .bl { border-left: 1px solid #000; }
+  .hdr td { padding: 6px 8px; }
+  .hdr .co { font-size: 11.5px; line-height: 1.55; }
+  .hdr .co .name { font-size: 13.5px; font-weight: bold; }
+  .hdr .logo { text-align: center; vertical-align: middle; width: 22%; }
+  .hdr .logo img { max-height: 70px; max-width: 100%; }
+  .hdr .right { text-align: right; font-size: 14px; color: #222; line-height: 1.7; vertical-align: middle; }
+  .hdr .right .ar { font-size: 17px; direction: rtl; }
+  .title { text-align: center; font-size: 17px; font-weight: bold; padding: 5px; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; letter-spacing: .5px; }
+  .party td { padding: 0; }
+  .party .lines div { padding: 3px 6px; font-size: 11px; font-weight: bold; }
+  .party .lines div.big { font-size: 13px; }
+  .party .lines div.u { border-top: 1px solid #000; }
+  .qr { width: 90px; padding: 6px !important; }
+  .qr svg { width: 80px; height: 80px; display: block; }
+  .bar td { border-top: 1px solid #000; padding: 3px 6px; font-weight: bold; }
+  .items th { border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
+  .items th + th, .items td + td { border-left: 1px solid #000; }
+  .items td { padding: 4px 6px; }
+  .items .desc .t { font-weight: bold; font-size: 11.5px; }
+  .items .desc .d { white-space: pre-line; font-weight: bold; font-size: 10px; line-height: 1.9; }
+  .items .c { text-align: center; font-weight: bold; }
+  .items .r { text-align: right; font-weight: bold; }
+  .items .tot td { border-top: 1px solid #000; font-weight: bold; padding: 4px 6px; }
+  .items .tot td.nb { border-top: 0; }
+  .items .tot.grand td:not(.nb) { font-size: 12.5px; background: #f1f1f1; }
+  .words { border-top: 1px solid #000; padding: 4px 6px; font-weight: bold; }
+  .bank td { padding: 3px 6px; font-weight: bold; font-size: 12px; }
+  .sign td { padding: 4px 6px; height: 72px; font-weight: bold; font-size: 12px; }
+  .stamp { position: absolute; right: 18mm; max-height: 105px; max-width: 150px; opacity: .9; margin-top: -40px; }
+  .note { border-top: 1.5px solid #000; padding: 5px 6px; font-weight: bold; font-size: 11.5px; text-decoration: underline; line-height: 1.6; }
+  .foot { border-top: 1.5px solid #000; padding: 10px 10px 0; position: relative; min-height: 120px; }
+  .foot table td { vertical-align: middle; padding: 4px; font-size: 14px; color: #333; }
+  .foot svg { width: 30px; height: 30px; vertical-align: middle; }
+  .foot .addr { text-align: center; font-size: 15px; line-height: 1.3; }
+  .foot .tri { position: absolute; left: 0; bottom: 0; width: 0; height: 0; border-bottom: 45px solid #777; border-right: 110px solid transparent; }
+  .draft { position: absolute; top: 40%; left: 12%; font-size: 120px; color: rgba(200, 0, 0, .12); transform: rotate(-30deg); font-weight: bold; pointer-events: none; }
+  .toolbar { text-align: center; padding: 10px; }
+  .toolbar button, .toolbar a { font-size: 14px; padding: 8px 18px; margin: 0 4px; cursor: pointer; }
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; width: auto; }
+    .toolbar { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <button onclick="window.print()">🖨 Print</button>
+  <a href="{{ url_for('doc_view', doc_id=doc.id) }}">← Back</a>
+</div>
+
+<div class="page">
+{% if doc.status == 'Draft' %}<div class="draft">DRAFT</div>{% elif doc.status == 'Pending' %}<div class="draft">NOT APPROVED</div>{% endif %}
+<div class="sheet">
+  <table class="hdr">
+    <tr>
+      <td class="co" style="width:44%">
+        <div class="name">{{ S.company_name }}</div>
+        {% for line in S.address_lines.splitlines() %}<div>{{ line }}</div>{% endfor %}
+        <div class="b" style="font-size:12.5px">TRN NO: {{ S.trn }}</div>
+      </td>
+      <td class="logo">{% if S.logo %}<img src="{{ S.logo|upload_url }}" alt="">{% endif %}</td>
+      <td class="right">{{ S.company_name }}<br><span class="ar">{{ S.company_name_ar }}</span></td>
+    </tr>
+  </table>
+
+  <div class="title">{{ titles[doc.doc_type] }}</div>
+
+  <table class="party">
+    <tr>
+      <td class="lines" style="width:50%">
+        <div class="big">{% if purchase %}Supplier: {% endif %}{{ doc.cust_name }}</div>
+        <div>Area: {{ doc.cust_area }}</div>
+        <div>P.O.Box: {{ doc.cust_po_box }}</div>
+        <div>Contact:{{ doc.cust_contact }}</div>
+        <div class="big">TRN No: {{ doc.cust_trn }}</div>
+        {% if not purchase %}<div>&nbsp;Buyer ( if different from consignee) : {{ doc.buyer }}</div>{% endif %}
+      </td>
+      <td class="lines bl">
+        <div class="big">{{ nolabel }}:{{ doc.doc_no }}</div>
+        <div>{{ datelabel }}: {{ doc.doc_date|ddmmyyyy }}</div>
+        {% if doc.doc_type == 'GRN' %}<div>Supplier DO No: {{ doc.supplier_do_no }}</div><div>Supplier DO Date: {{ doc.supplier_do_date|ddmmyyyy }}</div>
+        {% elif doc.doc_type == 'PI' and doc.supplier_inv_no %}
+        <div>Supplier Invoice No: {{ doc.supplier_inv_no }}</div><div>Supplier Invoice Date: {{ doc.supplier_inv_date|ddmmyyyy }}</div>
+        {% endif %}
+        {% if doc.doc_type == 'PI' and sources and sources[0].supplier_do_no %}
+        <div>Supplier DO: {% for s_ in sources %}{{ s_.supplier_do_no }} ({{ s_.supplier_do_date|ddmmyyyy }}){{ ', ' if not loop.last }}{% endfor %}</div>
+        {% endif %}
+        {% if doc.doc_type in ('SR', 'PR') %}<div>Reason for return: {{ doc.notes }}</div>{% endif %}
+        <div>Kind Attention: {{ doc.attention }}</div>
+        <div>{{ 'Supplier Ref No' if purchase else 'LPO NO' }}: {{ doc.lpo_no }}</div>
+        {% if sources %}<div>Ref: {{ {'SO': 'Sales Order', 'DN': 'DO No', 'PO': 'PO No', 'GRN': 'GRN No', 'INV': 'Invoice No', 'PI': 'PI No'}[sources[0].doc_type] }} {{ sources|map(attribute='doc_no')|join(', ') }}</div>{% endif %}
+        <div>Delivery Location: {{ doc.delivery_location }}</div>
+        {% set line_whs = items|map(attribute='warehouse_id')|unique|list %}
+        {% if line_whs|length == 1 and line_whs[0] in WAREHOUSES %}<div>Warehouse: {{ WAREHOUSES[line_whs[0]].code }} - {{ WAREHOUSES[line_whs[0]].name }}</div>
+        {% elif line_whs|length > 1 %}<div>Warehouse: per line</div>{% endif %}
+        <div>Payment Terms:{{ doc.payment_terms }}</div>
+        <div class="u">{{ doc.payment_resp }}</div>
+      </td>
+      <td class="qr">{{ qr }}</td>
+    </tr>
+  </table>
+
+  <table class="bar">
+    <tr><td style="width:50%;text-align:center">Mode of Dispatch : {{ doc.dispatch_mode }}</td>
+        <td class="bl">Good Description : {{ doc.goods_desc }}</td></tr>
+  </table>
+
+  <div class="items">
+  <table>
+    {% set used = namespace(mm=0) %}
+    {% for it in items %}{% set lines = (it.details or "").splitlines()|length %}{% set used.mm = used.mm + (4 + 5 * [lines, 1]|max if priced else 6 + 5 * lines) %}{% endfor %}
+    {% if priced %}
+    <thead>
+      <tr>
+        <th style="width:5%">S/No</th><th style="width:20%">Item</th><th>Specification</th><th style="width:9%">Qty</th><th style="width:8%">Unit</th>
+        <th style="width:11%">Unit Price</th><th style="width:13%">Value</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td class="c">{{ it.sl }}</td>
+        <td class="desc"><div class="t">{{ it.title }}</div>{% if line_whs|length > 1 and it.warehouse_id in WAREHOUSES %}<div class="d">Warehouse: {{ WAREHOUSES[it.warehouse_id].code }}</div>{% endif %}</td>
+        <td class="desc"><div class="d">{{ it.details }}</div></td>
+        <td class="c">{{ it.qty|num }}</td>
+        <td class="c">{{ it.unit }}</td>
+        <td class="r">{{ it.rate|money }}{% if it|disc %}<div class="d">{{ it|disc }}</div>{% endif %}</td>
+        <td class="r">{{ it.amount|money }}</td>
+      </tr>
+    {% endfor %}
+      {# each extra totals row takes ~5.5mm from the item area #}
+      {% set tot_rows = (4 if doc.discount_amount else 2) + charges|length %}
+      <tr class="filler" style="height:{{ [6, 89 + extra - used.mm - 5.5 * tot_rows]|max }}mm"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    </tbody>
+    <tfoot>
+      <tr class="tot">
+        <td colspan="3" style="text-align:right">Total Qty</td><td class="c">{{ doc.total_qty|num }}</td>
+        <td colspan="2">Total Value</td><td class="r">{{ doc.subtotal|money }}</td>
+      </tr>
+      {% if doc.discount_amount %}
+      <tr class="tot"><td colspan="4" class="nb"></td>
+        <td colspan="2">Less Discount{% if doc.discount_type == 'percent' %} ({{ doc.discount_value|num }}%){% endif %}</td>
+        <td class="r">-{{ doc.discount_amount|money }}</td></tr>
+      <tr class="tot"><td colspan="4" class="nb"></td><td colspan="2">Taxable Amount</td>
+        <td class="r">{{ (doc.subtotal - doc.discount_amount)|money }}</td></tr>
+      {% endif %}
+      <tr class="tot"><td colspan="4" class="nb"></td><td colspan="2">VAT {{ doc.vat_rate|num }}%</td><td class="r">{{ doc.vat_amount|money }}</td></tr>
+      {% for c in charges %}<tr class="tot"><td colspan="4" class="nb"></td><td colspan="2">{{ c.description }}{% if c.currency and c.currency != doc.currency %} ({{ c.currency }} {{ c.amount|money }}){% endif %}</td><td class="r">{{ (c.base_amount / (doc.exchange_rate or 1))|money }}</td></tr>{% endfor %}
+      <tr class="tot grand"><td colspan="4" class="nb"></td><td colspan="2">Grand Total {{ doc.currency or S.currency }}</td><td class="r">{{ doc.total|money }}</td></tr>
+      {% if doc.currency and doc.currency != BASE_CUR %}<tr class="tot"><td colspan="4" class="nb"></td><td colspan="2">Exchange rate {{ '%g'|format(doc.exchange_rate) }} · {{ BASE_CUR }}</td><td class="r">{{ doc.base_total|money }}</td></tr>{% endif %}
+    </tfoot>
+    {% else %}
+    <thead>
+      <tr>
+        <th style="width:7%">S/No</th><th>Description</th>
+        <th style="width:16%">Qty</th><th style="width:14%">Unit</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td class="c">{{ it.sl }}</td>
+        <td class="desc"><div class="t">{{ it.title }}</div><div class="d">{{ it.details }}</div>{% if line_whs|length > 1 and it.warehouse_id in WAREHOUSES %}<div class="d">Warehouse: {{ WAREHOUSES[it.warehouse_id].code }}</div>{% endif %}</td>
+        <td class="c">{{ it.qty|num }}</td>
+        <td class="c">{{ it.unit }}</td>
+      </tr>
+    {% endfor %}
+      <tr class="filler" style="height:{{ [6, 96 + extra - used.mm]|max }}mm"><td></td><td></td><td></td><td></td></tr>
+    </tbody>
+    <tfoot>
+      <tr class="tot">
+        <td style="border-left:0"></td><td>Total Qty</td><td class="c">{{ doc.total_qty|num }}</td><td></td>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+  </div>
+  {% if priced %}<div class="words">Amount in words: {{ words }}</div>{% endif %}
+
+  {% if not purchase %}
+  <table class="bank bt">
+    <tr><td>{{ S.company_name }}</td></tr>
+    <tr><td>IBAN: {{ S.bank_iban }}</td></tr>
+    <tr><td>BIC: {{ S.bank_bic }},&nbsp;&nbsp;&nbsp; {{ S.bank_name }}</td></tr>
+  </table>
+  {% endif %}
+  <table class="sign{{ ' bt' if purchase }}">
+    <tr>
+      <td style="width:50%">{{ {'PO': "Supplier's Acceptance:", 'GRN': 'Received By:', 'PI': 'Checked By:', 'PR': "Supplier's Acceptance:",
+         'SR': 'Received By:'}.get(doc.doc_type, "Receiver' Signature:") }}<br><br><br><br>Date:</td>
+      <td class="bl">Authorized Signatory
+        {% if S.stamp %}<br><img class="stamp" src="{{ S.stamp|upload_url }}" alt="">{% endif %}</td>
+    </tr>
+  </table>
+
+  {% if not purchase %}<div class="note">{{ S.footer_note }}</div>{% endif %}
+
+  <div class="foot">
+    <table>
+      <tr>
+        <td rowspan="2" style="width:6%"><svg viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="1.6"><path d="M12 22s7-6.5 7-12a7 7 0 1 0-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg></td>
+        <td rowspan="2" class="addr" style="width:28%">{% for line in S.footer_address.splitlines() %}{{ line }}<br>{% endfor %}</td>
+        <td style="width:6%"><svg viewBox="0 0 24 24" fill="#555"><path d="M2 5h20v14H2z" fill="#777"/><path d="M2 5l10 8 10-8" stroke="#fff" stroke-width="1.5" fill="none"/></svg></td>
+        <td>{{ S.email }}</td>
+        <td style="width:6%"><svg viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="1.4"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20"/></svg></td>
+        <td>{{ S.website }}</td>
+      </tr>
+      <tr>
+        <td><svg viewBox="0 0 24 24" fill="#333"><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/></svg></td>
+        <td style="font-size:16px">{{ S.phone }}</td>
+        <td><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#333"/><path d="M8.6 9.6a8 8 0 0 0 5.8 5.8l1.3-1.3c.2-.2.4-.2.6-.1.6.2 1.3.3 2 .3v2.4c0 .3-.2.5-.5.5A10 10 0 0 1 7.3 7.5c0-.3.2-.5.5-.5h2.4c0 .7.1 1.4.3 2 .1.2 0 .4-.1.6z" fill="#fff"/></svg></td>
+        <td>{{ S.mobile }}</td>
+      </tr>
+    </table>
+    <div class="tri"></div>
+  </div>
+</div>
+</div>
+
+{% if request.args.get('auto') %}<script>window.onload = () => setTimeout(() => window.print(), 300);</script>{% endif %}
+</body>
+</html>

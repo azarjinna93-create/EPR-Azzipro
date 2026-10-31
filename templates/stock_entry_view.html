@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Stock {{ 'In' if e.kind == 'IN' else 'Out' }} <span class="docno">{{ e.se_no }}</span>
+  <span class="status {{ 'Submitted' if e.status == 'Posted' else e.status }}">{{ e.status }}</span></h2>
+<div class="actions">
+  <button class="btn" onclick="window.print()">🖨 Print</button>
+  <a class="btn light" href="{{ url_for('stock_entries') }}">← Stock entries</a>
+  {% if e.status == 'Posted' and current_user.role == 'admin' %}
+  <span class="spacer"></span>
+  {% if url_ok(url_for('stock_entry_cancel', eid=e.id), 'POST') %}
+  <form method="post" action="{{ url_for('stock_entry_cancel', eid=e.id) }}" class="decide" onsubmit="return confirm('Cancel {{ e.se_no }}? Its stock and journal entry will be reversed.')">
+    <input name="reason" placeholder="Reason to cancel" required><button class="btn danger">Cancel entry</button></form>
+  {% endif %}
+  {% endif %}
+</div>
+<div class="card kv">
+  <p>Date: <b>{{ e.se_date|ddmmyyyy }}</b><br>Warehouse: <b>{{ e.wh_code }} · {{ e.wh_name }}</b><br>
+    {{ 'Credit' if e.kind == 'IN' else 'Debit' }} account: <b><a href="{{ url_for('account_ledger', aid=e.account_id) }}">{{ e.acc_code }} {{ e.acc_name }}</a></b><br>
+    Narration: <b>{{ e.narration }}</b><br>
+    <span class="muted small">Posted by {{ e.username }} on {{ e.created_at }}</span>
+    {% if e.status == 'Cancelled' %}<br><span class="bad-big">Cancelled {{ e.cancelled_at }} by {{ e.cancelled_name }} — {{ e.cancel_reason }}</span>{% endif %}</p>
+</div>
+<h3>Items</h3>
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>#</th><th>Product</th><th>Note</th><th class="r">Qty {{ 'in' if e.kind == 'IN' else 'out' }}</th><th class="r">Unit cost</th><th class="r">Value</th></tr></thead>
+  <tbody>
+  {% for l in lines %}
+    <tr><td>{{ loop.index }}</td><td><a href="{{ url_for('stock_ledger', pid=l.product_id) }}">{{ l.code }}</a> {{ l.name }}</td>
+      <td class="small">{{ l.note }}</td><td class="r">{{ l.qty|num }} {{ l.unit }}</td>
+      <td class="r">{{ '%.4f'|format(l.cost) if l.cost is not none }}</td><td class="r">{{ l.value|money if l.value is not none }}</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="5" class="r"><b>Total</b></td><td class="r"><b>{{ lines|map(attribute='value')|select|sum|money }}</b></td></tr></tfoot>
+</table>
+</div>
+<h3>Journal entry</h3>
+{% if gl %}
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Account</th><th class="r">Debit</th><th class="r">Credit</th></tr></thead>
+  <tbody>
+  {% for l in gl %}
+    <tr><td><a href="{{ url_for('account_ledger', aid=l.account_id) }}">{{ l.code }} {{ l.name }}</a></td>
+      <td class="r">{{ l.debit|money if l.debit }}</td><td class="r">{{ l.credit|money if l.credit }}</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td class="r"><b>Total</b></td><td class="r"><b>{{ gl|sum(attribute='debit')|money }}</b></td>
+    <td class="r"><b>{{ gl|sum(attribute='credit')|money }}</b></td></tr></tfoot>
+</table>
+</div>
+{% else %}
+<p class="muted">{{ 'No journal lines — this entry was cancelled.' if e.status == 'Cancelled' else 'No journal lines (the stock value is zero).' }}</p>
+{% endif %}
+{% endblock %}

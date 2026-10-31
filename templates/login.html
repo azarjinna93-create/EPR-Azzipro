@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Login - Azzi Soft{% endblock %}
+{% block content %}
+<div class="login-card card">
+  {% if S.logo %}<img class="login-logo" src="{{ S.logo|upload_url }}" alt="">{% endif %}
+  <h1>Azzi Soft</h1>
+  <p class="muted">{{ S.company_name }}</p>
+  <form method="post">
+    <label>User Name<input name="username" required autofocus autocomplete="username"></label>
+    <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
+    <button class="btn primary wide">Login</button>
+  </form>
+</div>
+{% endblock %}

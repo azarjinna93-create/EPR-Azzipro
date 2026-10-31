@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Trial Balance</h2>
+<p class="muted">{{ S.company_name }} ·
+  {% if d_from or d_to %}period {{ d_from|ddmmyyyy or 'start' }} to {{ d_to|ddmmyyyy or 'today' }}{% else %}all dates{% endif %} · {{ S.currency }}</p>
+<form class="filters" method="get">
+  <label class="inline-label">From <input type="date" name="from" value="{{ d_from }}"></label>
+  <label class="inline-label">To (as of) <input type="date" name="to" value="{{ d_to }}"></label>
+  <label class="check"><input type="checkbox" name="all" value="1" {{ 'checked' if show_all }}> Show accounts with no balance</label>
+  <button class="btn">Show</button>
+  <span class="spacer"></span>
+  <span class="{{ 'ok-big' if balanced else 'bad-big' }}">{{ '✓ Balanced' if balanced else '✕ Not balanced' }}</span>
+  <button type="button" class="btn" onclick="window.print()">🖨 Print</button>
+</form>
+<div class="table-wrap">
+<table class="grid">
+  <thead>
+    <tr><th rowspan="2">Code</th><th rowspan="2">Account</th><th colspan="2" class="center">Opening</th>
+      <th colspan="2" class="center">Period</th><th colspan="2" class="center">Closing balance</th></tr>
+    <tr><th class="r">Debit</th><th class="r">Credit</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Debit</th><th class="r">Credit</th></tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    {% if r.is_group %}
+    <tr class="coa-group"><td>{{ r.code }}</td><td colspan="7" style="padding-left:{{ 10 + r.depth * 22 }}px">{{ r.name }}</td></tr>
+    {% else %}
+    <tr>
+      <td>{{ r.code }}</td>
+      <td style="padding-left:{{ 10 + r.depth * 22 }}px"><a href="{{ url_for('account_ledger', aid=r.id, **{'from': d_from, 'to': d_to}) }}">{{ r.name }}</a></td>
+      <td class="r">{{ r.opening|money if r.opening > 0 }}</td><td class="r">{{ (-r.opening)|money if r.opening < 0 }}</td>
+      <td class="r">{{ r.debit|money if r.debit }}</td><td class="r">{{ r.credit|money if r.credit }}</td>
+      <td class="r"><b>{{ r.closing|money if r.closing > 0 }}</b></td><td class="r"><b>{{ (-r.closing)|money if r.closing < 0 }}</b></td>
+    </tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="2" class="r"><b>Total</b></td>
+    <td class="r"><b>{{ sums.op_dr|money }}</b></td><td class="r"><b>{{ sums.op_cr|money }}</b></td>
+    <td class="r"><b>{{ sums.debit|money }}</b></td><td class="r"><b>{{ sums.credit|money }}</b></td>
+    <td class="r"><b>{{ sums.cl_dr|money }}</b></td><td class="r"><b>{{ sums.cl_cr|money }}</b></td></tr></tfoot>
+</table>
+</div>
+{% endblock %}

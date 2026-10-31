@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Products</h2>
+<form method="post" class="card">
+  <h3>{{ 'Edit product ' ~ edit.code if edit else 'Add product' }}
+    {% if not edit %}<span class="docno small">{{ next_code }}</span>{% endif %}</h3>
+  {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+  <div class="row">
+    <label>Code<input value="{{ edit.code if edit else next_code ~ ' (automatic)' }}" disabled></label>
+    <label style="flex:2">Item name *<input name="name" required value="{{ edit.name if edit }}"></label>
+    <label>Unit<input name="unit" list="units" value="{{ edit.unit if edit else 'Nos' }}"></label>
+  </div>
+  <label>Specification<textarea name="details" rows="2">{{ edit.details if edit }}</textarea></label>
+  <div class="row">
+    <label>Sale price ({{ S.currency }})<input name="sale_price" type="number" step="any" min="0" value="{{ edit.sale_price|num if edit and edit.sale_price else '' }}"></label>
+    <label>Purchase price ({{ S.currency }})<input name="purchase_price" type="number" step="any" min="0" value="{{ edit.purchase_price|num if edit and edit.purchase_price else '' }}"></label>
+    <label class="check" style="align-self:end"><input type="checkbox" name="active" value="1" {{ 'checked' if not edit or edit.active }}> Active (suggested on documents)</label>
+  </div>
+  <datalist id="units">{% for u in UNITS %}<option value="{{ u }}">{% endfor %}</datalist>
+  <button class="btn primary">{{ 'Update' if edit else 'Add product' }}</button>
+  {% if edit %}<a class="btn light" href="{{ url_for('products') }}">Cancel</a>{% endif %}
+  <p class="muted small">New items typed on a Sales or Purchase document are added here automatically with the next code.
+    The latest price used on a document becomes the product's sale / purchase price.</p>
+</form>
+
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Search code, name, specification">
+  <button class="btn">Search</button>
+  {% if q %}<a class="btn light" href="{{ url_for('products') }}">Reset</a>{% endif %}
+</form>
+
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Code</th><th>Item</th><th>Specification</th><th>Unit</th><th class="r">Sale price</th><th class="r">Purchase price</th><th class="r">Stock</th><th class="r">Avg cost</th>
+    <th class="r">Used</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for p in rows %}
+    <tr>
+      <td class="nowrap"><b>{{ p.code }}</b></td><td>{{ p.name }}</td><td class="pre small">{{ p.details }}</td><td>{{ p.unit }}</td>
+      <td class="r">{{ p.sale_price|money }}</td><td class="r">{{ p.purchase_price|money }}</td>
+      <td class="r"><a href="{{ url_for('stock_ledger', pid=p.id) }}">{{ p.stock_qty|num }}</a></td><td class="r">{{ '%.4f'|format(p.avg_cost or 0) }}</td>
+      <td class="r">{{ p.used }}</td>
+      <td>{% if p.active %}<span class="status Submitted">Active</span>{% else %}<span class="status Draft">Inactive</span>{% endif %}</td>
+      <td class="nowrap"><a class="btn small light" href="{{ url_for('products', edit=p.id) }}">Edit</a>
+        {% if current_user.role == 'admin' and not p.used %}
+        <form method="post" action="{{ url_for('product_delete', pid=p.id) }}" class="inline" onsubmit="return confirm('Delete {{ p.code }}?')">
+          <button class="btn small danger">Delete</button></form>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="11" class="muted center">No products yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endblock %}

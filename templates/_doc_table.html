@@ -1,0 +1,35 @@
+{% set rows = recent if recent is defined else docs %}
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Type</th><th>No.</th><th>Status</th><th>Date</th><th>Warehouse</th><th>Customer / Supplier</th><th>LPO / Ref</th><th>From</th><th>Next</th>
+    <th class="r">Total Qty</th><th class="r">Amount</th><th>Created by</th><th></th></tr></thead>
+  <tbody>
+  {% for d in rows %}
+    <tr>
+      <td><span class="tag {{ d.doc_type }}">{{ DOC_TYPES[d.doc_type] }}</span></td>
+      <td><a href="{{ url_for('doc_view', doc_id=d.id) }}"><b>{{ d.doc_no }}</b></a></td>
+      <td><span class="status {{ d.status }}">{{ d.status }}</span></td>
+      <td>{{ d.doc_date|ddmmyyyy }}</td>
+      <td>{{ WAREHOUSES[d.warehouse_id].code if d.warehouse_id in WAREHOUSES else '' }}</td>
+      <td>{{ d.cust_name }}</td>
+      <td>{{ d.lpo_no }}{% if d.supplier_do_no %}<br><span class="small muted">Supp. DO {{ d.supplier_do_no }} · {{ d.supplier_do_date|ddmmyyyy }}</span>{% endif %}{% if d.supplier_inv_no %}<br><span class="small muted">Supp. Inv {{ d.supplier_inv_no }} · {{ d.supplier_inv_date|ddmmyyyy }}</span>{% endif %}</td>
+      <td class="small">{{ d.parent_no or '' }}</td>
+      <td class="small">{{ d.child_no or '' }}
+        {% if d.status == 'Submitted' %}
+          {% if d.open_qty %}<br><span class="pending">pending {{ d.open_qty|num }}</span>
+          {% elif d.doc_type in ('DN', 'GRN') and not d.child_no %}<span class="pending">pending</span>{% endif %}
+        {% endif %}</td>
+      <td class="r">{{ d.total_qty|num }}</td>
+      <td class="r">{% if d.doc_type not in UNPRICED %}{% if d.currency and d.currency != BASE_CUR %}<span class="small muted">{{ d.currency }}</span> {% endif %}{{ d.total|money }}{% else %}-{% endif %}</td>
+      <td>{{ d.creator }}</td>
+      <td class="nowrap">
+        <a class="btn small light" href="{{ url_for('doc_view', doc_id=d.id) }}">Open</a>
+        <a class="btn small" href="{{ url_for('doc_print', doc_id=d.id) }}" target="_blank">Print</a>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="13" class="muted center">No documents yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

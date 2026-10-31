@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+{% set K = kind|title %}
+<h2>{{ word }} Master</h2>
+{% if back %}
+<div class="flash ok">Adding a {{ word|lower }} for your {{ 'Purchase Order' if kind == 'supplier' else 'Sales Order' }} —
+  after you save you'll go straight back to it with this {{ word|lower }} filled in.
+  <a href="{{ back }}">← Back without adding</a></div>
+{% endif %}
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Search name, account, TRN, contact, e-mail">
+  <button class="btn">Search</button>
+  {% if q %}<a class="btn light" href="{{ url_for(endpoint) }}">Reset</a>{% endif %}
+</form>
+<form method="post" class="card" id="masterForm">
+  {% if back %}<input type="hidden" name="next" value="{{ back }}">{% endif %}
+  <h3>{{ 'Edit ' if edit else 'Add new ' }}{{ word|lower }}</h3>
+  {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+  <div class="row">
+    <label>Entity Code<input name="entity_code" value="{{ edit.entity_code if edit else (entity_default[0] if entity_default else '') }}"
+           placeholder="e.g. SALT"></label>
+    <label>{{ word }} Account Number<input name="account_no" value="{{ edit.account_no if edit }}"
+           placeholder="Auto: {{ next_no }}"></label>
+    <label style="flex:2">{{ word }} Organization Name *<input name="name" required value="{{ edit.name if edit }}" {{ 'autofocus' if back }}></label>
+  </div>
+  <div class="row">
+    <label>{{ word }} Country<input name="country" list="countries" value="{{ edit.country if edit else 'United Arab Emirates' }}"></label>
+    <label>Contact Name<input name="contact_name" value="{{ edit.contact_name if edit }}"></label>
+    <label>Contact Number<input name="contact" value="{{ edit.contact if edit }}"></label>
+    <label>e-mail ID<input name="email" type="email" value="{{ edit.email if edit }}"></label>
+    <label>Currency
+      <select name="currency">{% for c in CURRENCIES.values() if c.active or (edit and edit.currency == c.code) %}
+        <option value="{{ c.code }}" {{ 'selected' if (edit.currency if edit else BASE_CUR) == c.code }}>{{ c.code }} · {{ c.name }}</option>{% endfor %}
+      </select></label>
+  </div>
+  <div class="row">
+    <label>Area<input name="area" value="{{ edit.area if edit }}"></label>
+    <label>P.O.Box<input name="po_box" value="{{ edit.po_box if edit }}"></label>
+    <label>TRN No<input name="trn" value="{{ edit.trn if edit }}"></label>
+    <label>Kind Attention<input name="attention" value="{{ edit.attention if edit }}"></label>
+  </div>
+  <datalist id="countries">{% for c in ['United Arab Emirates', 'Saudi Arabia', 'Oman', 'Qatar', 'Kuwait', 'Bahrain', 'India',
+    'Pakistan', 'China', 'Egypt', 'Jordan', 'Turkey', 'United Kingdom', 'United States', 'Germany', 'Italy', 'Netherlands'] %}
+    <option value="{{ c }}">{% endfor %}</datalist>
+  <button class="btn primary">{{ 'Update' if edit else ('Save & return to order' if back else 'Add ' ~ word|lower) }}</button>
+  {% if edit %}<a class="btn light" href="{{ url_for(endpoint) }}">Cancel</a>{% endif %}
+</form>
+
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Entity Code</th><th>{{ word }} Account Number</th><th>{{ word }} Organization Name</th><th>{{ word }} Country</th>
+    <th>Contact Name</th><th>Contact Number</th><th>e-mail ID</th><th>Currency</th><th>Area</th><th>P.O.Box</th><th>TRN</th>
+    <th class="r">Balance</th><th></th></tr></thead>
+  <tbody>
+  {% for c in rows %}
+    <tr><td>{{ c.entity_code }}</td><td class="nowrap"><b>{{ c.account_no }}</b></td><td><b>{{ c.name }}</b></td><td>{{ c.country }}</td>
+      <td>{{ c.contact_name }}</td><td>{{ c.contact }}</td>
+      <td>{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% endif %}</td><td>{{ c.currency }}</td>
+      <td>{{ c.area }}</td><td>{{ c.po_box }}</td><td>{{ c.trn }}</td>
+      <td class="r"><a href="{{ url_for('statement', kind=kind, cid=c.id) }}">{{ c.balance|money }}</a></td>
+      <td class="nowrap"><a class="btn small light" href="{{ url_for(endpoint, edit=c.id) }}">Edit</a>
+        {% if current_user.role == 'admin' %}
+        <form method="post" action="{{ url_for('customer_delete', cid=c.id) }}" class="inline" onsubmit="return confirm('Delete {{ c.name }}?')">
+          <button class="btn small danger">Delete</button></form>{% endif %}</td></tr>
+  {% else %}
+    <tr><td colspan="13" class="muted center">No {{ word|lower }}s yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endblock %}

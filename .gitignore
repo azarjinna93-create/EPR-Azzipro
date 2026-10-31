@@ -1,0 +1,19 @@
+# Business data: never commit
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+entities/
+entities-backup-*/
+
+# Session signing key (generated on first run)
+.secret_key
+
+# Uploaded logo, stamp / signature and user photos
+static/uploads/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

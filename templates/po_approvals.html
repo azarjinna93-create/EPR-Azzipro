@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Purchase order approvals{% endblock %}
+{% block content %}
+<div class="fo-page">
+<div class="fo-crumb">Procurement and sourcing <span>|</span> Approval workflow</div>
+<div class="fo-title">
+  <h1>Purchase order approvals</h1>
+  <div class="fo-state"><span>Workflow</span><b class="{{ 'wf-on' if po_wf_on else 'wf-off' }}">{{ 'Enabled' if po_wf_on else 'Disabled' }}</b></div>
+  {% if current_user.role == 'admin' %}<a class="btn light" href="{{ url_for('po_workflow_setup') }}">⚙ Workflow setup</a>{% endif %}
+</div>
+{% if not po_wf_on %}<div class="flash error">The approval workflow is disabled, so new purchase orders are approved when submitted.
+  {% if pending %}POs already waiting below still need a decision.{% endif %}</div>{% endif %}
+
+<div class="fo-views">
+  <a class="fo-view {{ 'on' if tab == 'mine' }}" href="{{ url_for('po_approvals', tab='mine') }}">Assigned to me ({{ mine|length }})</a>
+  <a class="fo-view {{ 'on' if tab == 'all' }}" href="{{ url_for('po_approvals', tab='all') }}">All pending ({{ pending|length }})</a>
+  <a class="fo-view {{ 'on' if tab == 'history' }}" href="{{ url_for('po_approvals', tab='history') }}">History</a>
+</div>
+
+{% if tab in ('mine', 'all') %}
+{% set rows = mine if tab == 'mine' else pending %}
+<div class="fo-fast fo-listbox">
+  <div class="fo-gridwrap">
+  <table class="fo-grid wf-table">
+    <thead><tr><th>Purchase order</th><th>Vendor name</th><th class="r">Gross total</th><th>Order date</th><th>Created by</th>
+      <th>Waiting at</th><th>Approvers</th><th>Since</th><th>Decision</th></tr></thead>
+    <tbody>
+    {% for d in rows %}
+      <tr>
+        <td><a href="{{ url_for('doc_view', doc_id=d.id) }}">{{ d.doc_no }}</a></td>
+        <td>{{ d.cust_name|upper }}</td>
+        <td class="r">{{ d.currency or S.currency }} {{ d.total|money }}</td>
+        <td>{{ d.doc_date|ddmmyyyy }}</td>
+        <td>{{ d.creator }}</td>
+        <td><span class="status Pending">{{ d.step_name or '-' }}</span></td>
+        <td class="small">{% for uid in step_approvers(d) %}{{ names.get(uid, '?') }}{{ ', ' if not loop.last }}{% endfor %}</td>
+        <td class="small">{{ d.since }}</td>
+        <td class="wf-decide">
+          {% if can_approve(d) %}
+          <form method="post" action="{{ url_for('po_approve', doc_id=d.id) }}" class="inline">
+            <input type="hidden" name="next" value="{{ request.full_path }}">
+            <button class="btn small primary">✓ Approve</button></form>
+          <form method="post" action="{{ url_for('po_reject', doc_id=d.id) }}" class="inline"
+                onsubmit="const r = prompt('Reason for rejecting {{ d.doc_no }}:'); if (!r) return false; this.remark.value = r;">
+            <input type="hidden" name="next" value="{{ request.full_path }}"><input type="hidden" name="remark">
+            <button class="btn small danger">✕ Reject</button></form>
+          {% else %}<span class="muted small">Not your step</span>{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted center">{{ 'Nothing waiting for your approval.' if tab == 'mine' else 'No purchase orders are waiting for approval.' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% else %}
+<div class="fo-fast fo-listbox">
+  <div class="fo-gridwrap">
+  <table class="fo-grid wf-table">
+    <thead><tr><th>Date and time</th><th>Purchase order</th><th>Vendor name</th><th class="r">Gross total</th><th>Action</th><th>Step</th>
+      <th>By</th><th>Comment</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr>
+        <td>{{ h.at }}</td>
+        <td><a href="{{ url_for('doc_view', doc_id=h.doc_id) }}">{{ h.doc_no }}</a></td>
+        <td>{{ h.cust_name|upper }}</td>
+        <td class="r">{{ h.total|money }}</td>
+        <td><span class="wf-act {{ h.action }}">{{ h.action }}</span></td>
+        <td>{{ h.step_name or '-' }}</td>
+        <td>{{ h.username }}</td>
+        <td class="wf-remark">{{ h.remark }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted center">No workflow activity yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+</div>
+{% endblock %}

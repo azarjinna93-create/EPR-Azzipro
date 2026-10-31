@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="post" id="jvForm" autocomplete="off" class="fo-page">
+  <div class="fo-pane">
+    <div class="fo-cmdbar">
+      <a class="fo-cmd" href="{{ url_for('journal') }}" title="Back">←</a>
+      <button class="fo-cmd" id="post" onclick="return confirm('Post this journal? A posted journal cannot be edited.')">✔ Post</button>
+      <a class="fo-cmd" href="{{ url_for('jv_new') }}">＋ New</a>
+      <span class="fo-sep"></span>
+      <span class="fo-tab on">Journal voucher</span>
+      <span class="spacer"></span>
+      <a class="fo-cmd" href="{{ url_for('journal') }}">Cancel</a>
+    </div>
+  </div>
+
+  <div class="fo-crumb"><a href="{{ url_for('journal') }}">All journal entries</a> <span>|</span> Standard view</div>
+  <div class="fo-title">
+    <h1>{{ preview_no }} : Journal voucher</h1>
+    <div class="fo-state"><span>Status</span><b>New</b></div>
+    <div class="fo-state"><span>Balance</span><b id="diff">-</b></div>
+  </div>
+  <p class="muted small">For entries not made by documents — expenses, capital, bank charges, opening balances, corrections. Debits must equal credits.</p>
+
+  <details class="fo-fast" open>
+    <summary>Journal header</summary>
+    <div class="fo-fields pi-fields">
+      <div class="fo-col">
+        <h5>Journal</h5>
+        <div class="fo-f"><label>Voucher</label><span>{{ preview_no }}</span></div>
+        <div class="fo-f"><label>Date *</label><input type="date" name="jv_date" value="{{ today }}" required></div>
+      </div>
+      <div class="fo-col jv-narr">
+        <h5>Description</h5>
+        <div class="fo-f"><label>Narration *</label><input name="narration" required placeholder="e.g. Office rent for October paid by bank"></div>
+      </div>
+      <div class="fo-col">
+        <h5>Administration</h5>
+        <div class="fo-f"><label>Prepared by</label><span>{{ current_user.full_name or current_user.username }}</span></div>
+      </div>
+    </div>
+  </details>
+
+  <div class="fo-fast pi-lines">
+    <div class="pi-lines-head">Journal lines</div>
+    <div class="fo-gridbar">
+      <button type="button" class="fo-link" id="addLine">＋ Add line</button>
+      <button type="button" class="fo-link" id="removeLine">🗑 Remove</button>
+      <span class="muted">A line is either a debit or a credit. Drag a column heading to move it, or its right edge to resize.</span>
+      <button type="button" class="fo-link" data-cols-reset="jv-lines">Reset columns</button>
+    </div>
+    <div class="fo-gridwrap">
+    <table class="fo-grid pi-grid sheet" id="lines" data-cols="jv-lines" data-tpl="lineTpl">
+      <thead><tr><th class="sel"></th><th class="r" data-col="line">Line</th><th data-col="acc">Account</th><th data-col="narr">Line narration</th>
+        <th class="r" data-col="dr">Debit</th><th class="r" data-col="cr">Credit</th></tr></thead>
+      <tbody></tbody>
+      <tfoot><tr><td class="sel"></td><td data-col="line"></td><td data-col="acc"><b>Total</b></td><td data-col="narr"></td>
+        <td class="r" data-col="dr"><b id="tdr">0.00</b></td><td class="r" data-col="cr"><b id="tcr">0.00</b></td></tr></tfoot>
+    </table>
+    </div>
+  </div>
+</form>
+<template id="lineTpl">
+  <tr>
+    <td class="sel"><span class="radio"></span></td>
+    <td class="r sl" data-col="line"></td>
+    <td data-col="acc"><select name="account_id"><option value="">— account —</option>
+      {% for a in accounts %}<option value="{{ a.id }}">{{ a.code }} · {{ a.name }} ({{ a.type }})</option>{% endfor %}</select></td>
+    <td data-col="narr"><input name="line_narration"></td>
+    <td data-col="dr"><input name="debit" type="number" step="0.01" min="0" class="n"></td>
+    <td data-col="cr"><input name="credit" type="number" step="0.01" min="0" class="n"></td>
+  </tr>
+</template>
+<script>
+const tb = document.querySelector('#lines tbody'), tpl = document.getElementById('lineTpl');
+const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
+function add() { tb.appendChild(tpl.content.firstElementChild.cloneNode(true)); calc(); }
+function calc() {
+  let dr = 0, cr = 0;
+  [...tb.rows].forEach((tr, i) => {
+    tr.querySelector('.sl').textContent = i + 1;
+    dr += +tr.querySelector('[name=debit]').value || 0; cr += +tr.querySelector('[name=credit]').value || 0;
+  });
+  dr = r2(dr); cr = r2(cr);
+  document.getElementById('tdr').textContent = fmt(dr);
+  document.getElementById('tcr').textContent = fmt(cr);
+  const ok = dr > 0 && dr === cr;
+  document.getElementById('diff').textContent = ok ? '✓ Balanced' : (dr || cr ? 'Difference ' + fmt(Math.abs(dr - cr)) : '-');
+  document.getElementById('diff').className = ok ? 'ok-big' : (dr || cr ? 'bad-big' : '');
+  document.getElementById('post').disabled = !ok;
+}
+tb.addEventListener('input', e => {
+  // a line is either a debit or a credit
+  const tr = e.target.closest('tr');
+  if (e.target.name === 'debit' && e.target.value) tr.querySelector('[name=credit]').value = '';
+  if (e.target.name === 'credit' && e.target.value) tr.querySelector('[name=debit]').value = '';
+  calc();
+});
+const pick = tr => tb.querySelectorAll('tr').forEach(x => x.classList.toggle('on', x === tr));
+tb.addEventListener('click', e => { const tr = e.target.closest('tr'); if (tr) pick(tr); });
+tb.addEventListener('focusin', e => { const tr = e.target.closest('tr'); if (tr) pick(tr); });
+document.getElementById('addLine').onclick = add;
+document.getElementById('removeLine').onclick = () => {
+  const tr = tb.querySelector('tr.on');
+  if (!tr) return alert('Click a line to select it first.');
+  tr.remove(); calc();
+};
+add(); add();
+</script>
+{% endblock %}

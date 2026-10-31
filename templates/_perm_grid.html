@@ -1,0 +1,29 @@
+{# Permission matrix: one row per function, grouped by module; No access / View only / Full (create, edit, post, cancel).
+   Posted as perm_<function> = 0 / 1 / 2. Reports have no Full level. #}
+{% macro perm_grid(perms, id='permGrid') %}
+<table class="perm-grid" id="{{ id }}">
+  <thead><tr><th>Function</th><th>No access</th><th>View only</th><th>Full</th></tr></thead>
+  {% for mkey, mtitle in MODULES %}
+  <tbody data-module="{{ mkey }}">
+    <tr class="perm-mod"><td>{{ mtitle }}</td>
+      {% for lvl in (0, 1, 2) %}<td><button type="button" class="fo-link perm-all" data-lvl="{{ lvl }}"
+        title="Set every {{ mtitle }} function">all</button></td>{% endfor %}</tr>
+    {% for key, fmod, name, full in FEATURES if fmod == mkey %}
+    <tr><td>{{ name }}</td>
+      {% for lvl in (0, 1, 2) %}
+      <td>{% if lvl < 2 or full %}<input type="radio" name="perm_{{ key }}" value="{{ lvl }}" aria-label="{{ name }}: {{ ('No access', 'View only', 'Full')[lvl] }}"
+        {{ 'checked' if (perms.get(key, 0) if perms else 0) == lvl }}>{% else %}<span class="muted small">—</span>{% endif %}</td>
+      {% endfor %}</tr>
+    {% endfor %}
+  </tbody>
+  {% endfor %}
+</table>
+<script>
+document.querySelectorAll('#{{ id }} .perm-all').forEach(b => b.addEventListener('click', () => {
+  b.closest('tbody').querySelectorAll('input[type=radio]').forEach(r => {
+    const want = +b.dataset.lvl, has = [...r.closest('tr').querySelectorAll('input')].map(x => +x.value);
+    if (+r.value === Math.min(want, Math.max(...has))) r.checked = true;  // a report goes to View when Full is asked
+  });
+}));
+</script>
+{% endmacro %}

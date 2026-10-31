@@ -1,0 +1,9 @@
+{# Previous / Next links for paged lists; keeps the current filters. Needs page and has_next (count optional). #}
+{% if page > 1 or has_next %}
+{% set args = request.args.to_dict() %}
+<div class="pager">
+  {% if page > 1 %}<a class="btn small" href="{{ url_for(request.endpoint, **dict(request.view_args, **dict(args, page=page - 1))) }}">← Previous</a>{% endif %}
+  <span class="muted small">Page {{ page }}{% if count is defined and count %} of {{ ((count - 1) // 100) + 1 }} · {{ count }} total{% endif %}</span>
+  {% if has_next %}<a class="btn small" href="{{ url_for(request.endpoint, **dict(request.view_args, **dict(args, page=page + 1))) }}">Next →</a>{% endif %}
+</div>
+{% endif %}

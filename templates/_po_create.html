@@ -1,0 +1,207 @@
+{# Create purchase / sales order dialog (Dynamics-style side panel). OK opens the new order form with this header
+   filled in. Used by the purchase order list (dtype PO) and the sales order list (dtype SO). #}
+{% from "_terms.html" import term_options with context %}
+{% set sales = dtype == 'SO' %}
+{% set order = 'sales order' if sales else 'purchase order' %}
+{% set party_word = 'customer' if sales else 'vendor' %}
+<div class="po-create-back" id="pcBack" hidden></div>
+<aside class="po-create" id="poCreate" hidden aria-label="Create {{ order }}">
+  <div class="pc-head">
+    <span class="muted small">Standard view ⌄</span>
+    <h2>Create {{ order }}</h2>
+  </div>
+  <form id="pcForm" class="pc-body" autocomplete="off" novalidate>
+    <details class="fo-fast" open>
+      <summary>{{ party_word|title }}</summary>
+      <div class="pc-sec">
+        <label class="pc-toggle"><span>One-time {{ 'customer' if sales else 'supplier' }}</span>
+          <input type="checkbox" id="pcOneTime"><i></i><b id="pcOneTimeTx">No</b></label>
+        <div id="pcAccountBox">
+          <label>{{ party_word|title }} account <span class="req">*</span></label>
+          <div class="combo">
+            <input id="pcVendor" placeholder="Type account number or name">
+            <a class="combo-btn combo-add" title="Add a new {{ party_word }}"
+               href="{{ url_for('customers' if sales else 'suppliers', next=url_for('documents', type=dtype, new=1)) }}">+</a>
+          </div>
+          <ul class="combo-list" id="pcVendorList" hidden></ul>
+        </div>
+        <label>Name <span class="req" id="pcNameReq" hidden>*</span><input id="pcName" readonly class="ro"></label>
+        <label>Contact<input id="pcContact"></label>
+        <h5>Address</h5>
+        <div class="pc-addr" id="pcAddr">—</div>
+        <label>TRN<input id="pcTrn" readonly class="ro"></label>
+        <label>Delivery address<input id="pcDelivery" placeholder="Delivery location"></label>
+        <label>Kind attention<input id="pcAttention"></label>
+      </div>
+    </details>
+
+    <details class="fo-fast" open>
+      <summary>General <span class="pc-no">{{ preview_no }}</span></summary>
+      <div class="pc-sec pc-grid">
+        <div>
+          <h5>{{ order|capitalize }}</h5>
+          <label>{{ order|capitalize }}<input value="{{ preview_no }}" readonly class="ro"></label>
+          <label>{{ 'Sales' if sales else 'Purchase' }} type<select disabled><option>{{ order|capitalize }}</option></select></label>
+          <h5>References</h5>
+          <label>{{ 'Customer reference (LPO No)' if sales else 'Supplier reference' }}
+            <input id="pcRef" placeholder="{{ 'Customer purchase order no' if sales else 'Quotation / invoice no' }}"></label>
+          <label>Payment terms <span class="req">*</span><select id="pcTerms">{{ term_options(S.default_payment_terms if sales else '') }}</select>
+            <a class="small" href="{{ url_for('payment_terms_page') }}" target="_blank">Payment terms master</a></label>
+          <label>Mode of delivery<input id="pcDispatch" value="{{ S.default_dispatch }}"></label>
+        </div>
+        <div>
+          {% if sales %}
+          <div style="display:none"><select id="pcCur"><option value="{{ BASE_CUR }}" selected>{{ BASE_CUR }}</option></select>
+            <input id="pcRate" value="1"></div>
+          <h5>Currency</h5>
+          <label>Currency<input value="{{ BASE_CUR }}" readonly class="ro"></label>
+          {% else %}
+          <h5>Currency</h5>
+          <label>Currency <span class="req">*</span>
+            <select id="pcCur">{% for c in CURRENCIES.values() if c.active %}
+              <option value="{{ c.code }}" data-rate="{{ '%g'|format(c.rate) }}" {{ 'selected' if c.code == BASE_CUR }}>{{ c.code }} · {{ c.name }}</option>{% endfor %}
+            </select></label>
+          <label>Exchange rate<input id="pcRate" type="number" step="any" min="0" value="1" readonly class="ro"></label>
+          {% endif %}
+          <h5>Storage dimensions</h5>
+          <label>Warehouse <span class="req">*</span>
+            {% set wh_pick = WAREHOUSES.values()|selectattr('active')|list|length > 1 %}
+            <select id="pcWh">{% if wh_pick %}<option value="" selected>— select warehouse —</option>{% endif %}
+              {% for w in WAREHOUSES.values() if w.active %}
+              <option value="{{ w.id }}" {{ 'selected' if w.id == default_wh and not wh_pick }}>{{ w.code }} · {{ w.name }}</option>{% endfor %}
+            </select></label>
+          <h5>Dates</h5>
+          <label>Order date <span class="req">*</span><input type="date" id="pcDate" required></label>
+          {% if sales %}<input type="hidden" id="pcReceipt">
+          {% else %}<label>Requested receipt date<input type="date" id="pcReceipt"></label>{% endif %}
+        </div>
+      </div>
+    </details>
+
+    <details class="fo-fast" open>
+      <summary>Administration</summary>
+      <div class="pc-sec pc-grid">
+        <label>{{ 'Sales taker' if sales else 'Orderer' }}<input value="{{ current_user.full_name or current_user.username }}" readonly class="ro"></label>
+        <label>{{ 'Confirmation' if sales else 'Approval' }}<input value="{{ 'Confirmed on submit' if sales else ('Approval workflow on' if po_wf_on else 'Approved on submit') }}" readonly class="ro"></label>
+      </div>
+    </details>
+    <p class="pc-err" id="pcErr" hidden></p>
+  </form>
+  <div class="pc-foot">
+    <button type="submit" form="pcForm" class="btn primary pc-ok">OK</button>
+    <button type="button" class="btn light" data-close-create>Cancel</button>
+  </div>
+</aside>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const panel = $('poCreate'), back = $('pcBack');
+  let vendor = null, found = [], timer, looking = false;
+
+  function open() {
+    panel.hidden = back.hidden = false;
+    if (!$('pcDate').value) $('pcDate').value = new Date().toISOString().slice(0, 10);
+    setTimeout(() => ($('pcOneTime').checked ? $('pcName') : $('pcVendor')).focus(), 50);
+  }
+  function close() {
+    panel.hidden = back.hidden = true;
+    if (new URLSearchParams(location.search).has('new')) history.replaceState(null, '', '{{ url_for("documents", type=dtype) }}');
+  }
+  document.querySelectorAll('[data-open-create]').forEach(b => b.addEventListener('click', open));
+  document.querySelectorAll('[data-close-create]').forEach(b => b.addEventListener('click', close));
+  back.addEventListener('click', close);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) close(); });
+
+  function setVendor(v) {
+    vendor = v;
+    $('pcVendor').value = v ? (v.account_no ? v.account_no + ' · ' : '') + v.name : '';
+    $('pcName').value = v ? v.name : '';
+    $('pcContact').value = v ? [v.contact_name, v.contact].filter(Boolean).join(' · ') : '';
+    $('pcAttention').value = v ? v.attention || '' : '';
+    $('pcAddr').textContent = v ? [v.area, v.po_box && 'P.O.Box ' + v.po_box, v.country,
+                                   v.email].filter(Boolean).join(' · ') || '—' : '—';
+    $('pcTrn').value = v ? v.trn || '' : '';
+    $('pcVendorList').hidden = true;
+    if (v && v.currency && [...$('pcCur').options].some(o => o.value === v.currency)) { $('pcCur').value = v.currency; setRate(); }
+  }
+  function setRate() {
+    const base = $('pcCur').value === '{{ BASE_CUR }}';
+    $('pcRate').value = base ? 1 : $('pcCur').selectedOptions[0].dataset.rate;
+    $('pcRate').readOnly = base;
+    $('pcRate').classList.toggle('ro', base);
+  }
+  $('pcCur').addEventListener('change', setRate);
+  // {{ party_word }} search, asking the server as you type
+  // suggestions appear on click, while typing (or on ↓), never just because the box got focus
+  $('pcVendor').addEventListener('click', () => {
+    if (!$('pcVendorList').hidden) return;
+    looking = true;
+    search();
+  });
+  $('pcVendor').addEventListener('input', () => {
+    vendor = null; $('pcName').value = '';
+    clearTimeout(timer);
+    if (!$('pcVendor').value.trim()) { $('pcVendorList').hidden = true; return; }
+    looking = true;
+    search();
+  });
+  $('pcVendor').addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$('pcVendorList').hidden) { $('pcVendorList').hidden = true; e.stopPropagation(); }
+    if (e.key === 'ArrowDown' && $('pcVendorList').hidden) { looking = true; search(); }
+  });
+  function search() {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      found = await (await fetch('{{ url_for("api_parties") }}?kind={{ "customer" if sales else "supplier" }}&q='
+                                 + encodeURIComponent($('pcVendor').value.trim()))).json();
+      const ul = $('pcVendorList');
+      ul.replaceChildren(...(found.length ? found.map(v => {
+        const li = document.createElement('li');
+        li.innerHTML = '<span></span><small></small>';
+        li.firstChild.textContent = (v.account_no ? v.account_no + ' · ' : '') + v.name;
+        li.lastChild.textContent = v.country || v.area || '';
+        li.onmousedown = e => { e.preventDefault(); setVendor(v); };
+        return li;
+      }) : [Object.assign(document.createElement('li'), {className: 'empty', textContent: 'No {{ party_word }} found. Use + to add one.'})]));
+      if (looking) ul.hidden = false;  // not after leaving the box
+    }, 150);
+  }
+  $('pcVendor').addEventListener('blur', () => { looking = false; setTimeout(() => $('pcVendorList').hidden = true, 150); });
+
+  // one-time {{ party_word }}: type a name instead of choosing an account
+  $('pcOneTime').addEventListener('change', () => {
+    const one = $('pcOneTime').checked;
+    $('pcOneTimeTx').textContent = one ? 'Yes' : 'No';
+    $('pcAccountBox').hidden = one;
+    $('pcNameReq').hidden = !one;
+    $('pcName').readOnly = !one;
+    $('pcName').classList.toggle('ro', !one);
+    if (one) { setVendor(null); $('pcName').focus(); }
+  });
+
+  $('pcForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const one = $('pcOneTime').checked, err = $('pcErr');
+    const problem = !one && !vendor ? 'Choose a {{ party_word }} account from the list (or switch on One-time {{ "customer" if sales else "supplier" }}).'
+                  : one && !$('pcName').value.trim() ? 'Enter the {{ "customer" if sales else "supplier" }} name.'
+                  : !$('pcTerms').value || $('pcTerms').value === '__add__' ? 'Choose the payment terms.'
+                  : !$('pcWh').value ? 'Choose the warehouse.'
+                  : !$('pcDate').value ? 'Enter the order date.'
+                  : !(parseFloat($('pcRate').value) > 0) ? 'Enter the exchange rate.' : '';
+    err.textContent = problem; err.hidden = !problem;
+    if (problem) return;
+    const p = new URLSearchParams({
+      customer_id: vendor ? vendor.id : '', cust_name: one ? $('pcName').value.trim() : vendor.name,
+      cust_contact: $('pcContact').value, attention: $('pcAttention').value, delivery_location: $('pcDelivery').value,
+      lpo_no: $('pcRef').value, payment_terms: $('pcTerms').value, dispatch_mode: $('pcDispatch').value,
+      warehouse_id: $('pcWh').value, doc_date: $('pcDate').value, receipt_date: $('pcReceipt').value,
+      currency: $('pcCur').value, exchange_rate: $('pcRate').value,
+    });
+    location.href = '{{ url_for("doc_form", doc_type=dtype) }}?' + p.toString();
+  });
+
+  {% if new_party %}setVendor({{ new_party|tojson }});{% endif %}
+  if (new URLSearchParams(location.search).has('new')) open();
+})();
+</script>

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Journal Voucher <span class="docno">{{ j.jv_no }}</span>
+  <span class="status {{ 'Submitted' if j.status == 'Posted' else j.status }}">{{ j.status }}</span></h2>
+<div class="actions">
+  <button class="btn" onclick="window.print()">🖨 Print</button>
+  <a class="btn light" href="{{ url_for('journal', type='JV') }}">← Journal</a>
+  {% if j.status == 'Posted' and current_user.role == 'admin' %}
+  <span class="spacer"></span>
+  {% if url_ok(url_for('jv_cancel', jid=j.id), 'POST') %}
+  <form method="post" action="{{ url_for('jv_cancel', jid=j.id) }}" class="decide" onsubmit="return confirm('Cancel {{ j.jv_no }}?')">
+    <input name="reason" placeholder="Reason to cancel" required><button class="btn danger">Cancel journal</button></form>
+  {% endif %}
+  {% endif %}
+</div>
+<div class="card kv">
+  <p>Date: <b>{{ j.jv_date|ddmmyyyy }}</b><br>Narration: <b>{{ j.narration }}</b><br>
+    <span class="muted small">Posted by {{ j.username }} on {{ j.created_at }}</span>
+    {% if j.status == 'Cancelled' %}<br><span class="bad-big">Cancelled {{ j.cancelled_at }} by {{ j.cancelled_name }} — {{ j.cancel_reason }}</span>{% endif %}</p>
+</div>
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Account</th><th>Narration</th><th class="r">Debit</th><th class="r">Credit</th></tr></thead>
+  <tbody>
+  {% for l in lines %}
+    <tr><td><a href="{{ url_for('account_ledger', aid=l.account_id) }}">{{ l.code }} {{ l.name }}</a></td><td class="small">{{ l.narration }}</td>
+      <td class="r">{{ l.debit|money if l.debit }}</td><td class="r">{{ l.credit|money if l.credit }}</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr><td colspan="2" class="r"><b>Total</b></td><td class="r"><b>{{ lines|sum(attribute='debit')|money }}</b></td>
+    <td class="r"><b>{{ lines|sum(attribute='credit')|money }}</b></td></tr></tfoot>
+</table>
+</div>
+{% endblock %}

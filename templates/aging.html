@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% set rec = kind == 'customer' %}
+{% set title = 'Receivable aging' if rec else 'Payable aging' %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="fo-page">
+<div class="fo-pane no-print">
+  <div class="fo-cmdbar">
+    <a class="fo-cmd" href="{{ url_for('accounts', kind=kind) }}" title="Back">←</a>
+    <a class="fo-cmd {{ 'fo-tab on' if rec }}" href="{{ url_for('aging_report', kind='customer', as_of=as_of, basis=basis) }}">Receivable (customers)</a>
+    <a class="fo-cmd {{ 'fo-tab on' if not rec }}" href="{{ url_for('aging_report', kind='supplier', as_of=as_of, basis=basis) }}">Payable (suppliers)</a>
+    <span class="fo-sep"></span>
+    <button type="button" class="fo-cmd" onclick="window.print()">🖨 Print</button>
+    <a class="fo-cmd" href="{{ url_for('aging_report', kind=kind, as_of=as_of, basis=basis, party=party_id, export=1) }}">⭳ Export to Excel (CSV)</a>
+    {% if url_ok(url_for('payment_new', kind='receipt' if rec else 'payment')) %}<a class="fo-cmd" href="{{ url_for('payment_new', kind='receipt' if rec else 'payment') }}">＋ New {{ 'receipt' if rec else 'payment' }}</a>{% endif %}
+  </div>
+</div>
+
+<div class="fo-crumb">Accounts receivable and payable <span>|</span> Inquiries</div>
+<div class="fo-title">
+  <h1>{{ title }} <span class="muted" style="font-weight:400">as of {{ as_of|ddmmyyyy }}</span></h1>
+  <div class="fo-state"><span>Total {{ 'receivable' if rec else 'payable' }}</span><b>{{ S.currency }} {{ totals.net|money }}</b></div>
+  <div class="fo-state"><span>Overdue</span><b class="{{ 'bad-big' if totals.overdue }}">{{ S.currency }} {{ totals.overdue|money }}</b></div>
+</div>
+
+<form class="fo-filters no-print" method="get">
+  <label class="inline-label">As of <input type="date" name="as_of" value="{{ as_of }}" onchange="this.form.submit()"></label>
+  <select name="basis" onchange="this.form.submit()" aria-label="Age by">
+    <option value="due" {{ 'selected' if basis == 'due' }}>Age by due date (payment terms)</option>
+    <option value="invoice" {{ 'selected' if basis == 'invoice' }}>Age by invoice date</option>
+  </select>
+  <select name="party" onchange="this.form.submit()" aria-label="{{ 'Customer' if rec else 'Supplier' }}">
+    <option value="">All {{ 'customers' if rec else 'suppliers' }}</option>
+    {% for p in parties %}<option value="{{ p.id }}" {{ 'selected' if p.id == party_id }}>{{ p.name }}</option>{% endfor %}
+  </select>
+  <button type="button" class="btn small light" id="expandAll">Show all invoices</button>
+</form>
+
+<div class="fo-listbox">
+  <div class="fo-gridwrap">
+  <table class="fo-grid aging">
+    <thead><tr>
+      <th>{{ 'Customer' if rec else 'Supplier' }}</th>
+      {% for b in buckets %}<th class="r">{{ b }}{{ ' days' if not loop.first and not loop.last }}</th>{% endfor %}
+      <th class="r">Total due</th><th class="r">{{ 'Advance received' if rec else 'Advance paid' }}</th><th class="r">Net balance</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for pt in rows %}
+      <tr class="ag-party" data-party="{{ pt.id }}">
+        <td><span class="ag-caret">▸</span> <b>{{ pt.name }}</b> <span class="muted small">{{ pt.account_no or '' }} · {{ pt.invoices|length }} invoice{{ 's' if pt.invoices|length != 1 }}</span></td>
+        {% for v in pt.buckets %}<td class="r {{ 'ag-late' if v and not loop.first }}">{{ v|money if v else '' }}</td>{% endfor %}
+        <td class="r"><b>{{ pt.total|money }}</b></td>
+        <td class="r">{{ ('-' ~ (pt.unapplied|money)) if pt.unapplied else '' }}</td>
+        <td class="r"><b>{{ pt.net|money }}</b></td>
+        <td class="nowrap no-print"><a class="small" href="{{ url_for('statement', kind=kind, cid=pt.id) }}">statement</a></td>
+      </tr>
+      {% for i in pt.invoices %}
+      <tr class="ag-inv" data-of="{{ pt.id }}" hidden>
+        <td class="small">&nbsp;&nbsp;&nbsp;&nbsp;<a href="{{ url_for('doc_view', doc_id=i.id) }}">{{ i.doc_no }}</a>
+          {% if i.supplier_inv_no %}<span class="muted">(supp. inv {{ i.supplier_inv_no }})</span>{% endif %}
+          · {{ i.inv_date|ddmmyyyy }} · {{ i.payment_terms or 'no terms' }} · due {{ i.due_date|ddmmyyyy }}
+          {% if i.overdue > 0 %}<span class="bad-big">· {{ i.overdue }} days overdue</span>{% else %}<span class="muted">· not due</span>{% endif %}
+          <br><span class="muted">&nbsp;&nbsp;&nbsp;&nbsp;Invoice {{ i.total|money }} · paid / credited {{ i.paid|money }}</span></td>
+        {% for b in buckets %}<td class="r small">{{ i.outstanding|money if loop.index0 == i.bucket else '' }}</td>{% endfor %}
+        <td class="r small">{{ i.outstanding|money }}</td><td></td><td></td>
+        <td class="no-print">{% if url_ok(url_for('payment_new', kind='receipt' if rec else 'payment')) %}<a class="small" href="{{ url_for('payment_new', kind='receipt' if rec else 'payment', party=pt.id, invoice=i.id) }}">{{ 'receive' if rec else 'pay' }}</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    {% else %}
+      <tr><td colspan="{{ buckets|length + 5 }}" class="muted center">Nothing outstanding as of {{ as_of|ddmmyyyy }}.</td></tr>
+    {% endfor %}
+    </tbody>
+    {% if rows %}
+    <tfoot><tr>
+      <td><b>Total</b></td>
+      {% for v in totals.buckets %}<td class="r"><b>{{ v|money }}</b></td>{% endfor %}
+      <td class="r"><b>{{ totals.total|money }}</b></td><td class="r"><b>{{ ('-' ~ (totals.unapplied|money)) if totals.unapplied else '' }}</b></td>
+      <td class="r"><b>{{ totals.net|money }}</b></td><td></td>
+    </tr></tfoot>
+    {% endif %}
+  </table>
+  </div>
+</div>
+<p class="muted small">Due date = invoice date + the days of its payment term (Payment terms master). Amounts in {{ S.currency }}.
+  Advances are {{ 'receipts' if rec else 'payments' }} not allocated to an invoice; allocate them on a {{ 'receipt' if rec else 'payment' }} to clear invoices.
+  Click a {{ 'customer' if rec else 'supplier' }} to see the invoices.</p>
+</div>
+<script>
+// click a party to show / hide its invoices
+document.querySelectorAll('.ag-party').forEach(tr => tr.addEventListener('click', e => {
+  if (e.target.closest('a')) return;
+  const open = tr.classList.toggle('open');
+  tr.querySelector('.ag-caret').textContent = open ? '▾' : '▸';
+  document.querySelectorAll(`.ag-inv[data-of="${tr.dataset.party}"]`).forEach(r => r.hidden = !open);
+}));
+document.getElementById('expandAll').onclick = e => {
+  const show = e.target.textContent.startsWith('Show');
+  document.querySelectorAll('.ag-party').forEach(tr => { if (tr.classList.contains('open') !== show) tr.click(); });
+  e.target.textContent = show ? 'Hide invoices' : 'Show all invoices';
+};
+{% if party_id %}document.querySelectorAll('.ag-party').forEach(tr => tr.click());{% endif %}
+</script>
+{% endblock %}

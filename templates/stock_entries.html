@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Inventory · Stock entries</h2>
+<p class="muted small">Stock In / Stock Out vouchers. Each one moves stock and posts its own journal entry against the account chosen on it.</p>
+<form class="filters" method="get">
+  <select name="kind" onchange="this.form.submit()">
+    <option value="">In and out</option>
+    <option value="in" {{ 'selected' if kind == 'IN' }}>Stock in</option>
+    <option value="out" {{ 'selected' if kind == 'OUT' }}>Stock out</option>
+  </select>
+  <input name="q" value="{{ q }}" placeholder="Search entry no. / narration">
+  <button class="btn">Search</button>
+  <span class="spacer"></span>
+  {% if current_user.role == 'admin' %}
+  {% if url_ok(url_for('stock_entry_new', kind='in')) %}<a class="btn primary" href="{{ url_for('stock_entry_new', kind='in') }}">+ Stock In</a>
+  <a class="btn primary" href="{{ url_for('stock_entry_new', kind='out') }}">+ Stock Out</a>{% endif %}
+  {% endif %}
+</form>
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Date</th><th>Entry no.</th><th>Type</th><th>Warehouse</th><th>Narration</th><th>Account</th>
+    <th class="r">Lines</th><th class="r">Value</th><th>Status</th><th>By</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><td class="nowrap">{{ r.se_date|ddmmyyyy }}</td><td><a href="{{ url_for('stock_entry_view', eid=r.id) }}">{{ r.se_no }}</a></td>
+      <td><span class="tag S{{ r.kind }}">Stock {{ 'in' if r.kind == 'IN' else 'out' }}</span></td><td>{{ r.wh_code }}</td>
+      <td>{{ r.narration }}</td><td class="small">{{ r.acc_code }} {{ r.acc_name }}</td><td class="r">{{ r.lines }}</td>
+      <td class="r">{{ r.value|money if r.status == 'Posted' }}</td>
+      <td><span class="status {{ 'Submitted' if r.status == 'Posted' else r.status }}">{{ r.status }}</span></td><td class="small">{{ r.username }}</td></tr>
+  {% else %}
+    <tr><td colspan="10" class="muted center">No stock entries yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endblock %}

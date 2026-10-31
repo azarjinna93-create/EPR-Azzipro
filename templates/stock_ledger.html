@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Stock Ledger <span class="docno">{{ p.code }}</span> {{ p.name }}</h2>
+<div class="stats">
+  <div class="stat card"><span>Stock on hand</span><b>{{ p.stock_qty|num }} {{ p.unit }}</b></div>
+  <div class="stat card"><span>Average cost</span><b>{{ '%.4f'|format(p.avg_cost or 0) }}</b></div>
+  <div class="stat card"><span>Stock value</span><b>{{ S.currency }} {{ (p.stock_qty * p.avg_cost if p.stock_qty > 0 else 0)|money }}</b></div>
+</div>
+<div class="actions"><a class="btn light" href="{{ url_for('inventory', wh=wh) }}">← Stock Summary</a>
+  <span class="muted small">Warehouse:</span>
+  <a class="btn small {{ 'primary' if not wh else 'light' }}" href="{{ url_for('stock_ledger', pid=p.id) }}">All</a>
+  {% for w in by_wh %}<a class="btn small {{ 'primary' if w.id == wh else 'light' }}" href="{{ url_for('stock_ledger', pid=p.id, wh=w.id) }}"
+     title="{{ w.name }}">{{ w.code }}: {{ w.qty|num }}</a>{% endfor %}
+</div>
+
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Date</th><th>Type</th><th>Warehouse</th><th>Reference</th><th class="r">In</th><th class="r">Out</th><th class="r">Unit Cost</th>
+    <th class="r">Value</th><th class="r">Warehouse balance</th><th class="r">Total balance</th><th class="r">Avg Cost</th><th class="r">Balance Value</th><th>By</th><th></th></tr></thead>
+  <tbody>
+  {% for m in moves %}
+    <tr>
+      <td class="nowrap">{{ m.move_date|ddmmyyyy }}</td>
+      <td><span class="tag {{ m.kind }}">{{ {'GRN': 'GRN (in)', 'DN': 'Delivery (out)', 'ADJ': 'Adjustment', 'SR': 'Credit Note (in)',
+     'PR': 'Debit Note (out)', 'SIN': 'Stock in', 'SOUT': 'Stock out'}[m.kind] }}</span></td>
+      <td>{{ m.wh_code }}</td>
+      <td>{% if m.document_id %}<a href="{{ url_for('doc_view', doc_id=m.document_id) }}">{{ m.ref }}</a>{% elif m.entry_id %}<a
+        href="{{ url_for('stock_entry_view', eid=m.entry_id) }}">{{ m.ref }}</a> <span class="small muted">{{ m.note }}</span>{% else %}{{ m.note or m.ref }}{% endif %}</td>
+      <td class="r">{{ m.qty|num if m.qty > 0 }}</td>
+      <td class="r">{{ (-m.qty)|num if m.qty < 0 }}</td>
+      <td class="r">{{ '%.4f'|format(m.unit_cost) }}</td>
+      <td class="r">{{ m.value|money }}</td>
+      <td class="r"><b>{{ m.wh_balance|num }}</b></td>
+      <td class="r">{{ m.balance_qty|num }}</td>
+      <td class="r">{{ '%.4f'|format(m.avg_cost) }}</td>
+      <td class="r">{{ (m.balance_qty * m.avg_cost if m.balance_qty > 0 else 0)|money }}</td>
+      <td class="small">{{ m.username }}</td>
+      <td>{% if m.kind == 'ADJ' and current_user.role == 'admin' %}
+        <form method="post" action="{{ url_for('stock_move_delete', mid=m.id) }}" class="inline" onsubmit="return confirm('Remove this adjustment?')">
+          <button class="btn small danger">✕</button></form>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="14" class="muted center">No stock movements yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endblock %}

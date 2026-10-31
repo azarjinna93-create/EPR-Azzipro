@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+{% set inv_type = 'PI' if doc_type == 'PR' else 'INV' %}
+<h2>New {{ DOC_TYPES[doc_type] }} — choose the {{ DOC_TYPES[inv_type] }}</h2>
+{% if current_user.role != 'admin' %}<p class="flash ok">A {{ DOC_TYPES[doc_type] }} needs admin approval:
+  request it for the invoice, and once an admin approves you can post it. <a href="{{ url_for('my_requests') }}">My requests</a></p>{% endif %}
+<p class="muted">A {{ DOC_TYPES[doc_type] }} ({{ 'purchase' if doc_type == 'PR' else 'sales' }} return) is made against a submitted {{ DOC_TYPES[inv_type] }}. Only invoices with quantity still returnable are listed.</p>
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Search invoice no. or {{ 'supplier' if doc_type == 'PR' else 'customer' }}">
+  <button class="btn">Search</button>
+  <span class="muted small">Latest 200 matching invoices with returnable quantity.</span>
+</form>
+<div class="table-wrap">
+<table class="grid" id="list">
+  <thead><tr><th>{{ DOC_TYPES[inv_type] }}</th><th>Date</th><th>{{ 'Supplier' if doc_type == 'PR' else 'Customer' }}</th>
+    <th class="r">Invoiced Qty</th><th class="r">Returnable Qty</th><th class="r">Total</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="{{ url_for('doc_view', doc_id=r.id) }}"><b>{{ r.doc_no }}</b></a></td>
+      <td>{{ r.doc_date|ddmmyyyy }}</td><td>{{ r.cust_name }}</td>
+      <td class="r">{{ r.total_qty|num }}</td><td class="r"><b>{{ r.returnable|num }}</b></td><td class="r">{{ r.total|money }}</td>
+      <td class="nowrap">{% set st = states[r.id] %}
+        {% if st in ('admin', 'approved') %}
+          <a class="btn small primary" href="{{ url_for('doc_form', doc_type=doc_type, **{'from': r.id}) }}">Create {{ DOC_TYPES[doc_type] }}</a>
+          {% if st == 'approved' %}<span class="status Submitted">Approved</span>{% endif %}
+        {% elif st == 'pending' %}<span class="status Draft">⏳ Awaiting approval</span>
+        {% else %}<a class="btn small" href="{{ url_for('note_request', doc_type=doc_type, inv_id=r.id) }}">🔑 Request approval</a>{% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted center">No submitted {{ DOC_TYPES[inv_type] }}s with returnable quantity.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

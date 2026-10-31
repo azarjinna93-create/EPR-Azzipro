@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Journal · all entries</h2>
+<p class="muted small">Every posted document, stock adjustment, receipt / payment and journal voucher, as double-entry lines.</p>
+<form class="filters" method="get">
+  <label class="inline-label">From <input type="date" name="from" value="{{ d_from }}"></label>
+  <label class="inline-label">To <input type="date" name="to" value="{{ d_to }}"></label>
+  <select name="type">
+    <option value="">All sources</option>
+    {% for k, v in [('INV', 'Tax Invoice'), ('SR', 'Credit Note'), ('DN', 'Delivery Note'), ('PI', 'Purchase Invoice'),
+                    ('PR', 'Debit Note'), ('GRN', 'GRN'), ('RECEIPT', 'Receipt'), ('PAYMENT', 'Payment'), ('ADJ', 'Stock adjustment'), ('SIN', 'Stock in'), ('SOUT', 'Stock out'),
+                    ('JV', 'Journal voucher')] %}
+      <option value="{{ k }}" {{ 'selected' if typ == k }}>{{ v }}</option>{% endfor %}
+  </select>
+  <input name="q" value="{{ q }}" placeholder="Search entry no. / narration">
+  <button class="btn">Filter</button>
+  <a class="btn light" href="{{ url_for('journal') }}">Reset</a>
+  <span class="spacer"></span>
+  {% if url_ok(url_for('jv_new')) %}<a class="btn primary" href="{{ url_for('jv_new') }}">+ Journal Voucher</a>{% endif %}
+</form>
+<p class="muted small">{{ count }} entries (newest first) · total {{ S.currency }} {{ total|money }}</p>
+
+{% for e in entries %}
+<div class="table-wrap je">
+  <div class="je-head"><b>{{ e.date|ddmmyyyy }}</b><span class="tag {{ e.type }}">{{ e.type }}</span>
+    <a href="{{ e.url }}"><b>{{ e.no }}</b></a><span class="small">{{ e.narration }}</span></div>
+  <table class="grid">
+    {% for a, dr, cr, p in e.lines %}
+    <tr><td style="padding-left:{{ 10 if dr else 50 }}px"><a href="{{ url_for('account_ledger', aid=a) }}">{{ names.get(a, a) }}</a></td>
+      <td class="r" style="width:150px">{{ dr|money if dr }}</td><td class="r" style="width:150px">{{ cr|money if cr }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
+<p class="muted center">No entries.</p>
+{% endfor %}
+{% include "_pager.html" %}
+{% endblock %}

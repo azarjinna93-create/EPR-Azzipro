@@ -1,0 +1,305 @@
+{# Purchase Invoice entry, laid out like the Dynamics vendor invoice page. Included by doc_form.html, which supplies
+   the shared script: the field names and element ids below are the ones that script and the server expect. #}
+{% from "_terms.html" import term_options with context %}
+{% set grns = parents %}
+<form method="post" id="docForm" autocomplete="off" class="fo-page">
+  <input type="hidden" name="customer_id" id="customer_id" value="{{ d.customer_id if d and d.customer_id else '' }}">
+  {% if not doc %}{% for p in parents %}<input type="hidden" name="from" value="{{ p.id }}">{% endfor %}{% endif %}
+
+  <div class="fo-pane">
+    <div class="fo-cmdbar">
+      <a class="fo-cmd" href="{{ url_for('doc_view', doc_id=doc.id) if doc else url_for('documents', type='PI') }}" title="Back">←</a>
+      {% if doc and doc.status == 'Submitted' %}
+      <button class="fo-cmd" name="after" value="save">💾 Save changes</button>
+      {% else %}
+      <button class="fo-cmd" name="after" value="draft">💾 Save</button>
+      {% endif %}
+      <a class="fo-cmd" href="{{ url_for('invoice_select', doc_type='PI') }}">＋ New</a>
+      {% if doc and doc.status == 'Draft' and current_user.role == 'admin' %}
+      <button class="fo-cmd" formaction="{{ url_for('doc_delete', doc_id=doc.id) }}" formnovalidate
+              onclick="return confirm('Delete {{ doc.doc_no }}? This cannot be undone.')">🗑 Delete</button>
+      {% else %}<span class="fo-cmd off">🗑 Delete</span>{% endif %}
+      <button type="button" class="fo-cmd" id="cmdTotals">Totals</button>
+      {% if not doc or doc.status == 'Draft' %}
+      <button class="fo-cmd" name="after" value="submit" id="cmdPost"
+        onclick="if (!document.getElementById('supplier_inv_no').value.trim() || !document.getElementById('supplier_inv_date').value) {
+          alert('Enter the supplier\'s invoice Number and Invoice date to post.'); showView('lines'); document.getElementById('supplier_inv_no').focus(); return false; }
+          return confirm('Post this Purchase Invoice? After posting it is locked.')">Post</button>
+      {% else %}<span class="fo-cmd off">Post</span>{% endif %}
+      <span class="fo-sep"></span>
+      <span class="fo-tab on">Vendor invoice</span>
+      <span class="spacer"></span>
+      <a class="fo-cmd" href="{{ url_for('doc_view', doc_id=doc.id) if doc else url_for('documents', type='PI') }}">Cancel</a>
+    </div>
+  </div>
+
+  <div class="fo-crumb"><a href="{{ url_for('documents', type='PI') }}">Vendor invoice</a> <span>|</span> Standard view</div>
+  <div class="fo-title">
+    <h1>{{ (d.cust_name if d else '')|upper }}</h1>
+    <div class="fo-state"><span>Invoice</span><b>{{ doc.doc_no if doc else preview_no }}</b></div>
+    <div class="fo-state"><span>Status</span><b>{{ doc.status if doc else 'New' }}</b></div>
+  </div>
+  <div class="fo-views">
+    <button type="button" class="fo-view on" data-view="lines">Lines</button>
+    <button type="button" class="fo-view" data-view="header">Header</button>
+  </div>
+
+  <section data-view="lines">
+    <details class="fo-fast" open>
+      <summary>Vendor invoice header</summary>
+      <div class="fo-fields pi-fields">
+        <div class="fo-col">
+          <h5>Vendor</h5>
+          <div class="fo-f"><label>Invoice account</label><input value="{{ pi_party.account_no if pi_party else '' }}" readonly></div>
+          <div class="fo-f"><label>Name</label><input name="cust_name" id="cust_name" required readonly value="{{ d.cust_name if d }}"></div>
+          <h5 class="pi-h">Invoice identification</h5>
+          <div class="fo-f"><label for="supplier_inv_no">Number *</label>
+            <input name="supplier_inv_no" id="supplier_inv_no" value="{{ doc.supplier_inv_no if doc }}" placeholder="Supplier invoice no."></div>
+        </div>
+        <div class="fo-col">
+          <div class="fo-f"><label>Invoice description</label><input name="goods_desc" value="{{ d.goods_desc if d }}"></div>
+          <h5 class="pi-h">Related documents</h5>
+          <div class="fo-f"><label>Purchase order</label>
+            <span>{% for id, no in pi_pos %}<a href="{{ url_for('doc_view', doc_id=id) }}">{{ no }}</a>{{ ', ' if not loop.last }}{% else %}-{% endfor %}</span></div>
+        </div>
+        <div class="fo-col">
+          <div class="fo-f"><label>Product receipt</label>
+            <span>{% for p in grns %}<a href="{{ url_for('doc_view', doc_id=p.id) }}">{{ p.doc_no }}</a>{{ ', ' if not loop.last }}{% endfor %}</span></div>
+          <div class="fo-f"><label>Supplier DO</label>
+            <span>{% for p in grns %}{{ p.supplier_do_no or '-' }}{{ ', ' if not loop.last }}{% endfor %}</span></div>
+          <h5 class="pi-h">Invoice dates</h5>
+          <div class="fo-f"><label for="supplier_inv_date">Invoice date *</label>
+            <input type="date" name="supplier_inv_date" id="supplier_inv_date" value="{{ doc.supplier_inv_date if doc }}"></div>
+        </div>
+        <div class="fo-col">
+          <div class="fo-f"><label>Posting date</label><input type="date" name="doc_date" value="{{ doc.doc_date if doc else today }}" required></div>
+          <div class="fo-f"><label>Payment terms *</label><select name="payment_terms" required>{{ term_options(d.payment_terms if d) }}</select></div>
+          <div class="fo-f"><label>Supplier ref</label><input name="lpo_no" value="{{ d.lpo_no if d }}"></div>
+        </div>
+        <div class="fo-col">
+          <h5>Invoice status details</h5>
+          <div class="fo-f"><label>Status</label><span>{{ doc.status if doc else 'New' }}</span></div>
+          <div class="fo-f"><label>Quantity match status</label><span id="matchStatus">-</span></div>
+        </div>
+        <div class="fo-col">
+          <h5>Sales tax</h5>
+          <div class="fo-f"><label for="vat_rate">VAT %</label>
+            <input name="vat_rate" id="vat_rate" type="number" step="0.01" value="{{ d.vat_rate|num if d else S.vat_rate }}"></div>
+          <div class="fo-f"><label>Currency</label><input value="{{ cur }}{{ ' @ %g'|format(xr) if cur != BASE_CUR }}" readonly
+            title="Taken from the purchase order"></div>
+          <input type="hidden" name="currency" value="{{ cur }}"><input type="hidden" name="exchange_rate" id="exchange_rate" value="{{ xr }}">
+        </div>
+      </div>
+    </details>
+
+    <div class="fo-fast pi-lines">
+      <div class="pi-lines-head">Lines</div>
+      <div class="fo-gridbar">
+        <button type="button" class="fo-link" id="addRow">＋ Add line</button>
+        <button type="button" class="fo-link" id="removeRow">🗑 Remove</button>
+        <span class="muted">A line can't bill more than its GRN received. Drag a column heading to move it.</span>
+        <button type="button" class="fo-link" data-cols-reset="pi-lines">Reset columns</button>
+      </div>
+      <div class="fo-gridwrap">
+      <table class="fo-grid pi-grid sheet" id="items" data-cols="pi-lines">
+        <thead><tr>
+          <th class="sel"></th><th data-col="code">Item number</th><th data-col="name">Item name</th><th class="r" data-col="qty">Quantity</th>
+          <th data-col="unit">Unit</th><th data-col="wh">Warehouse</th><th class="r" data-col="rate">Unit price</th>
+          <th class="r" data-col="disc">Discount</th><th class="r" data-col="dpct">Discount %</th>
+          <th class="r" data-col="amt">Line net amount</th><th class="r" data-col="rcv">Product receipt qty</th><th data-col="qm">Qty match</th>
+          <th data-col="grn">Product receipt</th><th data-col="po">Purchase order</th>
+        </tr></thead>
+        <tbody></tbody>
+        <tfoot><tr>
+          <td class="sel"></td><td data-col="code"></td><td data-col="name"><b>Total</b></td><td class="r" data-col="qty"><b id="totQty">0</b></td>
+          <td data-col="unit"></td><td data-col="wh"></td><td class="r" data-col="rate"></td>
+          <td data-col="disc"></td><td class="r" data-col="dpct"><b class="curCode">{{ cur }}</b></td>
+          <td class="r" data-col="amt"><b id="sub">0.00</b></td><td data-col="rcv"></td><td data-col="qm"></td><td data-col="grn"></td><td data-col="po"></td>
+        </tr></tfoot>
+      </table>
+      </div>
+    </div>
+
+    <details class="fo-fast" id="landedPane" {{ 'open' if charges }}>
+      <summary>Landed cost <span class="muted small" id="lcSummary"></span></summary>
+      <div class="fo-gridbar">
+        <button type="button" class="fo-link" id="addCharge">＋ Add expense</button>
+        <span class="muted">Only when this delivery has other expenses. Billed on this invoice without VAT; the total
+          (in {{ cur }}) is added to the stock cost of the items, shared equally by each line. Charges left empty are ignored.</span>
+      </div>
+      <table class="fo-grid lc-grid">
+        <thead><tr><th>Landed cost other expenses</th><th>Currency</th><th class="r">Value</th><th class="r">In {{ cur }}</th><th></th></tr></thead>
+        <tbody id="charges"></tbody>
+        <tfoot><tr><td colspan="3"><b>Total landed cost</b> <span class="muted small" id="lcEach"></span></td>
+          <td class="r"><b id="lcTot">0.00</b></td><td></td></tr></tfoot>
+      </table>
+    </details>
+    <template id="chargeTpl">
+      <tr><td><input name="lc_desc" placeholder="Charge name"></td>
+        <td><select name="lc_cur" class="lc-cur">{% for c in CURRENCIES.values() if c.active or c.code == cur %}
+          <option value="{{ c.code }}" data-rate="{{ xr if c.code == cur else '%g'|format(c.rate) }}" {{ 'selected' if c.code == cur }}>{{ c.code }}</option>{% endfor %}
+        </select></td>
+        <td><input name="lc_amount" type="number" step="any" min="0" class="n"></td><td class="r lc-conv"></td>
+        <td><button type="button" class="fo-link lc-del" title="Remove this charge">✕</button></td></tr>
+    </template>
+
+    <details class="fo-fast" id="totalsPane" open>
+      <summary>Totals</summary>
+      {% set dtype = d.discount_type if d and d.discount_type else 'amount' %}
+      <table class="totals pi-totals">
+        <tr><td>Total Value</td><td></td><td class="r" id="sub2">0.00</td></tr>
+        <tr><td>Less Discount</td>
+          <td><input name="discount_value" id="discount_value" type="number" step="any" min="0" class="n" value="{{ d.discount_value|num if d and d.discount_value else '' }}">
+            <select name="discount_type" id="discount_type">
+              <option value="amount" {{ 'selected' if dtype == 'amount' }}>{{ cur }}</option>
+              <option value="percent" {{ 'selected' if dtype == 'percent' }}>%</option>
+            </select></td>
+          <td class="r" id="disc">0.00</td></tr>
+        <tr><td>Taxable Amount</td><td></td><td class="r" id="taxable">0.00</td></tr>
+        <tr><td>VAT <span id="vatPct"></span>%</td><td></td><td class="r" id="vat">0.00</td></tr>
+        <tr><td>Landed cost (no VAT)</td><td></td><td class="r" id="landed">0.00</td></tr>
+        <tr class="grand"><td>Grand Total {{ cur }}</td><td></td><td class="r" id="tot">0.00</td></tr>
+        <tr id="baseRow" {{ 'hidden' if cur == BASE_CUR }}><td>Total in {{ BASE_CUR }}</td><td></td><td class="r" id="baseTot">0.00</td></tr>
+      </table>
+    </details>
+  </section>
+
+  <section data-view="header" hidden>
+    <details class="fo-fast" open>
+      <summary>Vendor</summary>
+      <div class="fo-fields pi-fields">
+        <div class="fo-f"><label>Area</label><input name="cust_area" id="cust_area" value="{{ d.cust_area if d }}"></div>
+        <div class="fo-f"><label>P.O.Box</label><input name="cust_po_box" id="cust_po_box" value="{{ d.cust_po_box if d }}"></div>
+        <div class="fo-f"><label>Contact</label><input name="cust_contact" id="cust_contact" value="{{ d.cust_contact if d }}"></div>
+        <div class="fo-f"><label>TRN No</label><input name="cust_trn" id="cust_trn" value="{{ d.cust_trn if d }}"></div>
+        <div class="fo-f"><label>Kind attention</label><input name="attention" id="attention" value="{{ d.attention if d }}"></div>
+        <input type="hidden" name="buyer" value="{{ d.buyer if d }}">
+      </div>
+    </details>
+    <details class="fo-fast" open>
+      <summary>Delivery and payment</summary>
+      <div class="fo-fields pi-fields">
+        {% set cur_wh = d.warehouse_id if d and d.warehouse_id else default_wh %}
+        <div class="fo-f"><label>Default warehouse for lines</label>
+          <select name="warehouse_id" id="warehouse_id" required>
+            {% for w in WAREHOUSES.values() if w.active or w.id == cur_wh %}
+            <option value="{{ w.id }}" {{ 'selected' if w.id == cur_wh }}>{{ w.code }} · {{ w.name }}</option>
+            {% endfor %}
+          </select></div>
+        <div class="fo-f"><label>Delivery location</label><input name="delivery_location" value="{{ d.delivery_location if d }}"></div>
+        <div class="fo-f"><label>Mode of dispatch</label><input name="dispatch_mode" value="{{ d.dispatch_mode if d else S.default_dispatch }}"></div>
+        <div class="fo-f"><label>Payment note</label><input name="payment_resp" value="{{ d.payment_resp if d }}"></div>
+      </div>
+    </details>
+  </section>
+</form>
+
+<template id="rowTpl">
+  <tr>
+    <td class="sel"><span class="radio"></span><span class="sl" hidden></span></td>
+    <td class="code" data-col="code"></td>
+    <td data-col="name"><input name="title" class="title" autocomplete="off" placeholder="Type to search products">
+        <input type="hidden" name="product_id"><input type="hidden" name="source_item_id"><input type="hidden" name="details"></td>
+    <td data-col="qty"><input name="qty" type="number" step="any" class="n"></td>
+    <td data-col="unit"><input name="unit" list="units" class="unit" value="Nos"></td>
+    <td data-col="wh"><select name="line_wh" class="lwh" aria-label="Warehouse">
+      {% for w in WAREHOUSES.values() %}<option value="{{ w.id }}" {{ 'disabled' if not w.active }}>{{ w.code }}</option>{% endfor %}
+    </select></td>
+    <td data-col="rate"><input name="rate" type="number" step="any" class="n"></td>
+    <td data-col="disc"><input name="disc_amt" type="number" step="any" min="0" class="n" placeholder="per unit"></td>
+    <td data-col="dpct"><input name="disc_pct" type="number" step="any" min="0" max="100" class="n" placeholder="%"></td>
+    <td class="r amt" data-col="amt">0.00</td>
+    <td class="r rcv" data-col="rcv"><span class="pend" hidden></span></td>
+    <td class="qm" data-col="qm"></td>
+    <td class="grn" data-col="grn"></td>
+    <td class="po" data-col="po"></td>
+  </tr>
+</template>
+<datalist id="units">{% for u in UNITS %}<option value="{{ u }}">{% endfor %}</datalist>
+<script>
+// Vendor invoice page: the line grid shows each line's GRN / PO and whether its quantity matches what was received
+const PI_REFS = {{ pi_refs|tojson }};
+const PI_URL = '{{ url_for("doc_view", doc_id=0) }}'.replace(/0$/, '');
+function link(id, no) { const a = document.createElement('a'); a.href = PI_URL + id; a.textContent = no; return a; }
+window.onRowAdded = (tr, it) => {
+  const ref = it && PI_REFS[it.source_item_id];
+  if (ref) {
+    tr.querySelector('.grn').replaceChildren(link(ref.grn_id, ref.grn_no));
+    if (ref.po_id) tr.querySelector('.po').replaceChildren(link(ref.po_id, ref.po_no));
+  }
+  tr.querySelector('.rcv').append(tr.dataset.pending !== undefined ? (+tr.dataset.pending).toLocaleString('en-US') : '');
+};
+window.afterRecalc = () => {
+  let failed = 0, n = 0;
+  document.querySelectorAll('#items tbody tr').forEach(tr => {
+    if (tr.dataset.pending === undefined) { tr.querySelector('.qm').textContent = ''; return; }
+    const ok = (parseFloat(tr.querySelector('[name=qty]').value) || 0) <= +tr.dataset.pending + 1e-9;
+    n++; if (!ok) failed++;
+    tr.querySelector('.qm').textContent = ok ? 'Passed' : 'Failed';
+    tr.querySelector('.qm').className = 'qm ' + (ok ? 'ok-big' : 'bad-big');
+  });
+  const ms = document.getElementById('matchStatus');
+  ms.textContent = n ? (failed ? `Failed (${failed} line${failed > 1 ? 's' : ''})` : 'Passed') : '-';
+  ms.className = n ? (failed ? 'bad-big' : 'ok-big') : '';
+};
+function showView(v) {
+  document.querySelectorAll('.fo-view').forEach(x => x.classList.toggle('on', x.dataset.view === v));
+  document.querySelectorAll('section[data-view]').forEach(s => s.hidden = s.dataset.view !== v);
+}
+document.querySelectorAll('.fo-view').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+// a selected line (click it) is what Remove takes out
+document.querySelector('#items tbody').addEventListener('click', e => {
+  const tr = e.target.closest('tr');
+  if (tr) document.querySelectorAll('#items tbody tr').forEach(x => x.classList.toggle('on', x === tr));
+});
+document.getElementById('removeRow').onclick = () => {
+  const tr = document.querySelector('#items tbody tr.on');
+  if (!tr) return alert('Click a line to select it first.');
+  tr.remove(); recalc();
+};
+// landed cost charges: the total and each line's equal share follow what is typed
+const charges = document.getElementById('charges');
+function addCharge(c) {
+  const tr = document.getElementById('chargeTpl').content.firstElementChild.cloneNode(true);
+  if (typeof c === 'string') tr.querySelector('[name=lc_desc]').value = c;
+  else if (c) {
+    tr.querySelector('[name=lc_desc]').value = c.description;
+    tr.querySelector('[name=lc_amount]').value = c.amount;
+    const sel = tr.querySelector('[name=lc_cur]');
+    if ([...sel.options].some(o => o.value === c.currency)) sel.value = c.currency;
+  }
+  charges.appendChild(tr);
+  return tr;
+}
+// a charge in invoice currency: value as is; any other: through base currency at that currency's rate
+const inDocCur = tr => {
+  const sel = tr.querySelector('[name=lc_cur]');
+  return round2(val(tr.querySelector('[name=lc_amount]')) * (+sel.selectedOptions[0].dataset.rate || 1) / xrate());
+};
+window.landedTotal = () => round2([...charges.rows].reduce((s, tr) => s + inDocCur(tr), 0));
+window.afterLanded = () => {
+  const lines = [...tbody.rows].filter(tr => tr.querySelector('[name=title]').value.trim()).length;
+  const tot = landedTotal();
+  document.getElementById('lcTot').textContent = fmt(tot);
+  document.getElementById('lcEach').textContent = tot && lines ? `· ${fmt(round2(tot / lines))} added to each of ${lines} line${lines > 1 ? 's' : ''}` : '';
+  [...charges.rows].forEach(tr => {
+    const v = inDocCur(tr);
+    tr.querySelector('.lc-conv').textContent = v ? fmt(v) : '';
+  });
+  document.getElementById('lcSummary').textContent = tot ? '· {{ cur }} ' + fmt(tot) : '';
+};
+document.getElementById('addCharge').onclick = () => {
+  document.getElementById('landedPane').open = true;
+  addCharge().querySelector('[name=lc_desc]').focus();
+};
+charges.addEventListener('input', () => recalc());
+charges.addEventListener('change', () => recalc());
+charges.addEventListener('click', e => { if (e.target.classList.contains('lc-del')) { e.target.closest('tr').remove(); recalc(); } });
+const SAVED_CHARGES = {{ charges|tojson }};
+(SAVED_CHARGES.length ? SAVED_CHARGES
+  : ['Freight Cost', 'Local Transport', 'Duty', 'Handling Charges', 'Port Charges']).forEach(addCharge);
+document.getElementById('cmdTotals').onclick = () => {
+  showView('lines');
+  const t = document.getElementById('totalsPane'); t.open = true; t.scrollIntoView({behavior: 'smooth'});
+};
+</script>

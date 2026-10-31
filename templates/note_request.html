@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Request a {{ DOC_TYPES[doc_type] }} <span class="docno">{{ inv.doc_no }}</span></h2>
+<p class="muted">Posting a {{ DOC_TYPES[doc_type] }} needs admin approval. Send this request; when an admin approves it you can post
+  one {{ DOC_TYPES[doc_type] }} against this invoice.</p>
+
+<div class="two-col">
+  <div class="card kv">
+    <h3>{{ inv.cust_name }}</h3>
+    <p>{{ DOC_TYPES[inv.doc_type] }} <a href="{{ url_for('doc_view', doc_id=inv.id) }}"><b>{{ inv.doc_no }}</b></a>
+      · {{ inv.doc_date|ddmmyyyy }}<br>Total {{ S.currency }} <b>{{ inv.total|money }}</b></p>
+  </div>
+  <div class="card">
+    {% if state == 'pending' %}
+      <p class="flash ok">⏳ Your request for this invoice is waiting for an admin. <a href="{{ url_for('my_requests') }}">My requests</a></p>
+    {% else %}
+    <form method="post">
+      <label>Reason for the return *<textarea name="reason" rows="3" required
+        placeholder="Which items, how many and why — e.g. 20 rolls damaged in transit"></textarea></label>
+      <button class="btn primary">Send request to admin</button>
+      <a class="btn light" href="{{ url_for('doc_view', doc_id=inv.id) }}">Cancel</a>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<h3>Invoice lines</h3>
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>S/No</th><th>Item</th><th class="r">Invoiced</th><th class="r">Already returned</th><th class="r">Returnable</th><th>Unit</th></tr></thead>
+  <tbody>
+  {% for l in lines %}
+    <tr><td class="center">{{ l.sl }}</td><td><b>{{ l.title }}</b> <span class="muted small">{{ l.code }}</span></td>
+      <td class="r">{{ l.qty|num }}</td><td class="r">{{ l.done|num }}</td><td class="r"><b>{{ l.pending|num }}</b></td><td>{{ l.unit }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

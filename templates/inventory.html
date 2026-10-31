@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Inventory · Stock Summary{% if wh %} <span class="docno">{{ WAREHOUSES[wh].code }}</span> {{ WAREHOUSES[wh].name }}{% endif %}</h2>
+<div class="stats">
+  <div class="stat card"><span>Stock value (at average cost)</span><b>{{ S.currency }} {{ total|money }}</b></div>
+  <div class="stat card"><span>Products in stock</span><b>{{ in_stock }}</b></div>
+  <div class="stat card"><span>Negative stock</span><b>{{ negative }}</b></div>
+</div>
+<p class="muted small">Stock comes in when a GRN is submitted (at purchase price, net of discount) and goes out when a Delivery Note is
+  submitted (at the current average cost). Average cost = weighted average of all stock received.</p>
+
+<form class="filters" method="get">
+  <select name="wh" onchange="this.form.submit()" aria-label="Warehouse">
+    <option value="">All warehouses</option>
+    {% for w in WAREHOUSES.values() %}<option value="{{ w.id }}" {{ 'selected' if w.id == wh }}>{{ w.code }} · {{ w.name }}{{ '' if w.active else ' (inactive)' }}</option>{% endfor %}
+  </select>
+  <input name="q" value="{{ q }}" placeholder="Search code or name">
+  <button class="btn">Search</button>
+  {% if q or wh %}<a class="btn light" href="{{ url_for('inventory') }}">Reset</a>{% endif %}
+  <span class="spacer"></span>
+  <a class="btn light" href="{{ url_for('warehouses_page') }}">Warehouses</a>
+</form>
+
+<div class="table-wrap">
+<table class="grid">
+  <thead><tr><th>Code</th><th>Item</th><th>Unit</th><th class="r">{{ 'Qty in ' ~ WAREHOUSES[wh].code if wh else 'Stock Qty' }}</th>
+    {% if not wh %}<th>By warehouse</th>{% endif %}<th class="r">Avg Cost</th>
+    <th class="r">Stock Value</th><th class="r">Last purchase price</th><th>Last movement</th><th></th></tr></thead>
+  <tbody>
+  {% for p in rows %}
+    <tr class="{{ 'neg' if p.qty < 0 }}">
+      <td class="nowrap"><b>{{ p.code }}</b></td><td>{{ p.name }}</td><td>{{ p.unit }}</td>
+      <td class="r"><b>{{ p.qty|num }}</b></td>
+      {% if not wh %}<td class="small">{% for code, q_ in by_wh.get(p.id, []) %}<span class="{{ 'pending' if q_ < 0 }}">{{ code }} {{ q_|num }}</span>{{ ' · ' if not loop.last }}{% endfor %}</td>{% endif %}
+      <td class="r">{{ '%.4f'|format(p.avg_cost or 0) }}</td>
+      <td class="r">{{ (p.qty * p.avg_cost if p.qty > 0 else 0)|money }}</td>
+      <td class="r">{{ p.purchase_price|money }}</td>
+      <td>{{ p.last_move|ddmmyyyy if p.last_move else '-' }}</td>
+      <td><a class="btn small light" href="{{ url_for('stock_ledger', pid=p.id, wh=wh) }}">Ledger</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10" class="muted center">{{ 'No stock in this warehouse yet.' if wh else 'No products yet.' }}</td></tr>
+  {% endfor %}
+  </tbody>
+  {% if rows %}<tfoot><tr><td colspan="{{ 5 if wh else 6 }}" class="r"><b>Total stock value</b></td><td class="r"><b>{{ total|money }}</b></td><td colspan="3"></td></tr></tfoot>{% endif %}
+</table>
+</div>
+{% include "_pager.html" %}
+
+{% if current_user.role == 'admin' %}
+<form method="post" action="{{ url_for('stock_adjust') }}" class="card">
+  <h3>Stock adjustment / opening stock</h3>
+  <div class="row">
+    <label style="flex:2">Product
+      <input id="adjFind" list="adjList" placeholder="Type product code or name" autocomplete="off" required>
+      <datalist id="adjList"></datalist>
+      <input type="hidden" name="product_id" id="adjPid"></label>
+    <label>Warehouse
+      <select name="warehouse_id" required>
+        {% for w in WAREHOUSES.values() if w.active %}<option value="{{ w.id }}" {{ 'selected' if w.id == (wh or default_wh) }}>{{ w.code }} · {{ w.name }}</option>{% endfor %}
+      </select></label>
+    <label>Date<input type="date" name="move_date" value="{{ today }}"></label>
+    <label>Qty (+ add / − remove)<input name="qty" type="number" step="any" required></label>
+    <label>Unit cost (for + qty)<input name="unit_cost" type="number" step="any" min="0" placeholder="blank = current avg"></label>
+  </div>
+  <label>Reason / note<input name="note" placeholder="e.g. Opening stock, stock count difference, damaged"></label>
+  <button class="btn primary">Post adjustment</button>
+  <span class="muted small">Removals are valued at the current average cost.</span>
+</form>
+{% endif %}
+<script>
+// Product search for adjustments: asks the server as you type instead of listing every product
+const find = document.getElementById('adjFind');
+if (find) {
+  let found = [], timer;
+  find.oninput = () => {
+    const pick = found.find(p => `${p.code} · ${p.name}` === find.value);
+    document.getElementById('adjPid').value = pick ? pick.id : '';
+    clearTimeout(timer);
+    if (pick) return;
+    timer = setTimeout(async () => {
+      found = await (await fetch('{{ url_for("api_products") }}?q=' + encodeURIComponent(find.value))).json();
+      document.getElementById('adjList').innerHTML = found.map(p =>
+        `<option value="${(p.code + ' · ' + p.name).replace(/"/g, '&quot;')}">`).join('');
+    }, 150);
+  };
+  find.form.addEventListener('submit', e => {
+    if (!document.getElementById('adjPid').value) { e.preventDefault(); alert('Choose a product from the list.'); }
+  });
+}
+</script>
+{% endblock %}

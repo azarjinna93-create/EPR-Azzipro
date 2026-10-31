@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Currencies{% endblock %}
+{% block content %}
+<div class="fo-page">
+<div class="fo-crumb">General ledger <span>|</span> Setup</div>
+<div class="fo-title"><h1>Currencies</h1></div>
+<p class="muted">The accounting currency is <b>{{ BASE_CUR }}</b>. Purchase orders can be in any active currency below; the rate is how many
+  {{ BASE_CUR }} one unit is worth. A new PO starts with the rate shown here, and you can change it on the PO. GRNs, purchase
+  invoices and debit notes keep the rate of their PO, and the ledger, vendor balances and stock are always in {{ BASE_CUR }}.</p>
+
+<div class="fo-listbox">
+  <div class="fo-gridwrap">
+  <table class="fo-grid">
+    <thead><tr><th>Code</th><th>Name</th><th class="r">Rate ({{ BASE_CUR }} per unit)</th><th>Status</th><th>Updated</th>
+      <th class="r">Documents</th><th></th></tr></thead>
+    <tbody>
+    {% for c in rows %}
+      <tr>
+        <td><b>{{ c.code }}</b>{% if c.code == BASE_CUR %} <span class="status Submitted">Accounting currency</span>{% endif %}</td>
+        <td>{{ c.name }}</td>
+        <td class="r">{{ '%g'|format(c.rate) }}</td>
+        <td>{% if c.active %}Active{% else %}<span class="status Draft">Inactive</span>{% endif %}</td>
+        <td class="small">{{ c.updated_at or '' }}</td>
+        <td class="r">{{ used.get(c.code, 0) }}</td>
+        <td class="nowrap r">{% if current_user.role == 'admin' and c.code != BASE_CUR %}
+          <a class="btn small light" href="{{ url_for('currencies_page', edit=c.code) }}">Edit rate</a>
+          <form method="post" class="inline"><input type="hidden" name="act" value="toggle"><input type="hidden" name="code" value="{{ c.code }}">
+            <button class="btn small light">{{ 'Deactivate' if c.active else 'Activate' }}</button></form>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% if current_user.role == 'admin' %}
+<details class="fo-fast" open>
+  <summary>{{ 'Edit ' ~ edit.code if edit else 'Add currency' }}</summary>
+  <form method="post" class="wf-form">
+    <div class="row">
+      <label>Code *<input name="code" required maxlength="3" value="{{ edit.code if edit }}" {{ 'readonly' if edit }} placeholder="e.g. EUR"
+             style="text-transform:uppercase"></label>
+      <label>Name *<input name="name" required value="{{ edit.name if edit }}" placeholder="e.g. Euro"></label>
+      <label>Rate: {{ BASE_CUR }} per 1 unit *<input name="rate" type="number" step="any" min="0" required value="{{ '%g'|format(edit.rate) if edit }}"
+             placeholder="e.g. 4.25"></label>
+    </div>
+    <button class="btn primary">{{ 'Update' if edit else 'Add currency' }}</button>
+    {% if edit %}<a class="btn light" href="{{ url_for('currencies_page') }}">Cancel</a>{% endif %}
+  </form>
+</details>
+{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Azzi Soft{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+{# a page whose saving the user may not do (view-only access) shows its data without the add / edit forms #}
+<body class="{{ 'with-sidebar' if current_user }}{{ ' view-only' if current_user and not url_ok(request.full_path, 'POST') }}">
+{% if current_user %}
+{# Modules menu, modelled on the Dynamics navigation pane: each module opens a flyout with its pages grouped in columns #}
+{% set modules = [
+  ('sales', 'Sales', '🧾', [
+    ('Sales orders', [(url_for('documents', type='SO', new=1), 'New sales order'), (url_for('documents', type='SO'), 'All sales orders')]),
+    ('Deliveries', [(url_for('documents', type='DN'), 'Delivery notes')]),
+    ('Invoices', [(url_for('invoice_select', doc_type='INV'), 'New tax invoice'), (url_for('documents', type='INV'), 'Tax invoices'),
+                  (url_for('return_select', doc_type='SR'), 'New credit note'), (url_for('documents', type='SR'), 'Credit notes')]),
+    ('Customers', [(url_for('customers'), 'Customer master'), (url_for('accounts', kind='customer'), 'Customer accounts'),
+                   (url_for('aging_report', kind='customer'), 'Receivable aging')]),
+    ('Setup', [(url_for('payment_terms_page'), 'Payment terms')]),
+  ]),
+  ('purchase', 'Procurement and sourcing', '🛒', [
+    ('Purchase orders', [(url_for('documents', type='PO', new=1), 'New purchase order'), (url_for('documents', type='PO'), 'All purchase orders')]),
+    ('Receipts', [(url_for('documents', type='GRN'), 'Goods received notes')]),
+    ('Invoices', [(url_for('invoice_select', doc_type='PI'), 'New purchase invoice'), (url_for('documents', type='PI'), 'Purchase invoices'),
+                  (url_for('return_select', doc_type='PR'), 'New debit note'), (url_for('documents', type='PR'), 'Debit notes')]),
+    ('Vendors', [(url_for('suppliers'), 'Vendor master'), (url_for('accounts', kind='supplier'), 'Supplier accounts'),
+                 (url_for('aging_report', kind='supplier'), 'Payable aging'), (url_for('payment_terms_page'), 'Payment terms')]),
+    ('Approval workflow', [(url_for('po_approvals'), 'Purchase order approvals' ~ (' (' ~ po_pending ~ ')' if po_pending else ''))]
+                          + ([(url_for('po_workflow_setup'), 'Workflow setup')] if current_user.role == 'admin' else [])),
+  ]),
+  ('accounts', 'Accounts receivable and payable', '💳', [
+    ('Receipts', [(url_for('payment_new', kind='receipt'), 'New receipt'), (url_for('payments', kind='receipt'), 'All receipts')]),
+    ('Payments', [(url_for('payment_new', kind='payment'), 'New payment'), (url_for('payments', kind='payment'), 'All payments')]),
+    ('Balances', [(url_for('accounts', kind='customer'), 'Customer accounts'), (url_for('accounts', kind='supplier'), 'Supplier accounts')]),
+    ('Aging', [(url_for('aging_report', kind='customer'), 'Receivable aging (customers)'), (url_for('aging_report', kind='supplier'), 'Payable aging (suppliers)')]),
+    ('Setup', [(url_for('payment_terms_page'), 'Payment terms')]),
+  ]),
+  ('ledger', 'General ledger', '📒', [
+    ('Chart of accounts', [(url_for('coa'), 'Main accounts')]),
+    ('Journal entries', [(url_for('journal'), 'All journal entries'), (url_for('jv_new'), 'New journal voucher')]),
+    ('Inquiries and reports', [(url_for('trial_balance'), 'Trial balance'), (url_for('profit_loss', p='year'), 'Profit and loss')]),
+    ('Setup', [(url_for('fiscal_calendar'), 'Fiscal calendar and periods'), (url_for('currencies_page'), 'Currencies')]),
+  ]),
+  ('inventory', 'Inventory management', '📦', [
+    ('Inquiries', [(url_for('inventory'), 'Stock summary'), (url_for('inventory_transactions'), 'Inventory transactions'),
+                   (url_for('billing_log', type='STOCK'), 'Adjustment log')]),
+    ('Stock entries', [(url_for('stock_entry_new', kind='in'), 'New stock in'), (url_for('stock_entry_new', kind='out'), 'New stock out'),
+                       (url_for('stock_entries'), 'All stock entries')]),
+    ('Products', [(url_for('products'), 'Products')]),
+    ('Setup', [(url_for('warehouses_page'), 'Warehouses')]),
+  ]),
+  ('reports', 'Reports and logs', '📊', [
+    ('Documents', [(url_for('documents'), 'All documents')]),
+    ('Logs', [(url_for('billing_log'), 'Transaction log'), (url_for('my_requests'), 'My credit / debit note requests')]),
+  ]),
+] %}
+{# only the links this user may open (their access in User setup); groups and modules left empty are dropped #}
+{% set ns = namespace(mods=[]) %}
+{% for key, title, icon, groups in modules %}
+  {% set gs = namespace(list=[]) %}
+  {% for heading, links in groups %}
+    {% set ok = links|selectattr(0, 'url_ok')|list %}
+    {% if ok %}{% set gs.list = gs.list + [(heading, ok)] %}{% endif %}
+  {% endfor %}
+  {% if gs.list %}{% set ns.mods = ns.mods + [(key, title, icon, gs.list)] %}{% endif %}
+{% endfor %}
+{% set modules = ns.mods %}
+{% if current_user.role == 'admin' %}
+{% set admin_links = [(url_for('settings'), 'Settings'), (url_for('admin_entities'), 'Business entities'),
+                      (url_for('admin_users'), 'User setup'), (url_for('admin_roles'), 'Roles'),
+                      (url_for('approvals'), 'Approvals' ~ (' (' ~ pending_approvals ~ ')' if pending_approvals else '')),
+                      (url_for('admin_logs'), 'Activity log')] %}
+{% if session.admin_unlocked_at %}{% set admin_links = admin_links + [(url_for('admin_lock'), 'Lock admin panel')] %}{% endif %}
+{% set modules = modules + [('admin', 'System administration', '🔒', [('Setup', admin_links)])] %}
+{% endif %}
+
+<div class="mobilebar">
+  <button type="button" class="menu-toggle" aria-label="Menu" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="{{ url_for('dashboard') }}">Azzi Soft</a>
+  {% if ENTITY %}<span class="mobile-entity">{{ ENTITY.code }}</span>{% endif %}
+</div>
+<div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
+
+<aside class="sidebar" id="sidebar">
+  <div class="side-top">
+    <button type="button" class="nav-collapse" id="navCollapse" title="Collapse / expand navigation">☰</button>
+    <a class="brand" href="{{ url_for('dashboard') }}">
+      {% if S.logo %}<img src="{{ S.logo|upload_url }}" alt="">{% endif %}
+      <span>Azzi Soft</span>
+    </a>
+  </div>
+  {% if ENTITY %}
+  {# business entity being worked in: every page, entry and report belongs to it #}
+  <form class="entity-pick" method="post" action="{{ url_for('entity_switch') }}" title="Business entity">
+    <span class="ic">🏢</span>
+    {% if ENTITIES|length > 1 %}
+    <select name="entity" onchange="this.form.submit()" aria-label="Business entity">
+      {% for e in ENTITIES %}<option value="{{ e.id }}" {{ 'selected' if e.id == ENTITY.id }}>{{ e.code }} · {{ e.name }}</option>{% endfor %}
+    </select>
+    {% else %}<span class="tx">{{ ENTITY.code }} · {{ ENTITY.name }}</span>{% endif %}
+  </form>
+  {% endif %}
+
+  <nav class="side-nav">
+    <a class="nav-item" href="{{ url_for('dashboard') }}" title="Home"><span class="ic">🏠</span><span class="tx">Home</span></a>
+    <button type="button" class="nav-item" data-mod="recent" title="Recent"><span class="ic">🕘</span><span class="tx">Recent</span><span class="chev">›</span></button>
+    <div class="nav-head"><span class="ic">▦</span><span class="tx">Modules</span></div>
+    {% for key, title, icon, groups in modules %}
+    <button type="button" class="nav-item nav-mod" data-mod="{{ key }}" title="{{ title }}"><span class="ic">{{ icon }}</span>
+      <span class="tx">{{ title }}{% if key == 'admin' and pending_approvals %} <span class="badge">{{ pending_approvals }}</span>{% endif %}
+        {%- if key == 'purchase' and po_pending %} <span class="badge" title="Purchase orders waiting for your approval">{{ po_pending }}</span>{% endif %}</span><span class="chev">›</span></button>
+    {% endfor %}
+  </nav>
+
+  <div class="side-user">
+    <a href="{{ url_for('profile') }}" title="Change password">{% if current_user.photo %}<img class="side-photo" src="{{ current_user.photo|upload_url }}" alt="">{% else %}👤{% endif %}
+      <b>{{ current_user.full_name or current_user.username }}</b>
+      <small>{{ current_user.username }} · {{ current_user.role }}</small></a>
+    <a class="btn small light" href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</aside>
+
+<div class="flyout" id="flyout" hidden>
+  <button type="button" class="fly-close" id="flyClose" title="Close">✕</button>
+  <section data-mod="recent" hidden>
+    <h2>Recent</h2>
+    <ul class="fly-recent" id="flyRecent"></ul>
+  </section>
+  {% for key, title, icon, groups in modules %}
+  <section data-mod="{{ key }}" hidden>
+    <h2>{{ title }}</h2>
+    <input type="search" class="fly-search" placeholder="🔍 Filter" aria-label="Filter {{ title }}">
+    <div class="fly-cols">
+      {% for heading, links in groups %}
+      <div class="fly-group"><h3>{{ heading }}</h3>
+        {% for url, label in links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% endif %}
+
+<main class="container">
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  <div class="backbar" id="backBar" hidden><a href="#">←</a></div>
+  {% block content %}{% endblock %}
+</main>
+
+{% if current_user %}
+<script>
+// Modules menu: open a module's flyout, mark the module that holds the current page, remember recent pages
+(function () {
+  const $$ = (q, r) => [...(r || document).querySelectorAll(q)];
+  const fly = document.getElementById('flyout'), here = location.pathname + location.search;
+  const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
+
+  // the page you are on: exact link first, then the same path
+  const links = $$('.flyout section a');
+  const best = links.find(a => a.getAttribute('href') === here)
+            || links.find(a => a.getAttribute('href') === location.pathname)
+            || links.find(a => a.getAttribute('href').split('?')[0] === location.pathname);
+  if (best) {
+    best.classList.add('active');
+    const btn = document.querySelector('.nav-mod[data-mod="' + best.closest('section').dataset.mod + '"]');
+    if (btn) btn.classList.add('active');
+  }
+
+  function close() {
+    fly.hidden = true;
+    $$('.nav-item[data-mod]').forEach(b => b.classList.remove('open'));
+  }
+  $$('.nav-item[data-mod]').forEach(b => b.addEventListener('click', () => {
+    if (!fly.hidden && b.classList.contains('open')) return close();
+    $$('.nav-item[data-mod]').forEach(x => x.classList.toggle('open', x === b));
+    $$('section', fly).forEach(s => s.hidden = s.dataset.mod !== b.dataset.mod);
+    fly.hidden = false;
+    const f = fly.querySelector('section:not([hidden]) .fly-search');
+    if (f) { f.value = ''; f.dispatchEvent(new Event('input')); f.focus(); }
+  }));
+  document.getElementById('flyClose').addEventListener('click', close);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  document.addEventListener('click', e => {
+    if (!fly.hidden && !fly.contains(e.target) && !e.target.closest('.nav-item[data-mod]')) close();
+  });
+  // filter a module's pages
+  $$('.fly-search').forEach(f => f.addEventListener('input', () => {
+    const q = f.value.toLowerCase();
+    $$('.fly-group', f.closest('section')).forEach(g => {
+      let any = false;
+      $$('a', g).forEach(a => { const m = !q || a.textContent.toLowerCase().includes(q); a.hidden = !m; any = any || m; });
+      g.hidden = !any;
+    });
+  }));
+
+  // collapse to icons only
+  const collapse = v => { document.body.classList.toggle('nav-mini', v); store('azziNavMini', v); };
+  if (load('azziNavMini', false)) document.body.classList.add('nav-mini');
+  document.getElementById('navCollapse').addEventListener('click', () => collapse(!document.body.classList.contains('nav-mini')));
+
+  // recent pages (last 10)
+  let recent = load('azziRecent', []).filter(r => r.url !== here);
+  recent.unshift({url: here, title: document.title});
+  store('azziRecent', recent = recent.slice(0, 10));
+  const ul = document.getElementById('flyRecent');
+  recent.slice(1).forEach(r => {
+    const li = document.createElement('li'), a = document.createElement('a');
+    a.href = r.url; a.textContent = r.title; li.appendChild(a); ul.appendChild(li);
+  });
+  if (!ul.children.length) ul.innerHTML = '<li class="muted">No recent pages yet</li>';
+})();
+// Back arrow: every tab keeps the trail of pages opened in it, and "Back" returns to the page this one came from.
+// A page reached by saving a form takes the form's place, so Back never reopens a form that was just saved.
+(function () {
+  const KEY = 'azziTrail', here = location.pathname + location.search;
+  const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY)) || []; } catch (e) { return []; } };
+  const save = v => { try { sessionStorage.setItem(KEY, JSON.stringify(v.slice(-30))); } catch (e) {} };
+  let replace = false;
+  try { replace = sessionStorage.getItem('azziTrailReplace') === '1'; sessionStorage.removeItem('azziTrailReplace'); } catch (e) {}
+  const heading = document.querySelector('.fo-title h1, main h2');
+  const title = ((heading && heading.textContent) || document.title).replace(/\s+/g, ' ').trim().slice(0, 60);
+  let trail = load();
+  const n = trail.length;
+  if (n && trail[n - 1].url === here) trail[n - 1].title = title;          // reload
+  else if (n > 1 && trail[n - 2].url === here && !replace) trail.pop();     // went back
+  else {
+    if (replace && n) trail.pop();                                           // the form that was just saved
+    trail.push({url: here, title});
+  }
+  save(trail);
+  document.addEventListener('submit', e => {
+    if ((e.target.getAttribute('method') || '').toLowerCase() === 'post' && !e.defaultPrevented) {
+      try { sessionStorage.setItem('azziTrailReplace', '1'); } catch (err) {}
+    }
+  });
+  const prev = trail.length > 1 ? trail[trail.length - 2] : null;
+  // pages with their own ← (data-nav-back) use it; every other page gets the bar at the top
+  const own = document.querySelectorAll('[data-nav-back]');
+  own.forEach(a => { if (prev) { a.href = prev.url; a.title = 'Back to ' + prev.title; } });
+  const bar = document.getElementById('backBar');
+  if (prev && bar && !own.length && !document.querySelector('[data-no-back]')) {
+    const a = bar.querySelector('a');
+    a.href = prev.url;
+    a.textContent = '← Back to ' + prev.title;
+    bar.hidden = false;
+  }
+})();
+</script>
+<script>
+// Movable grid columns: drag a heading of a table[data-cols] onto another to move that column. Cells are matched by
+// data-col (header, rows, totals and the template new rows are made from), and the order is remembered per grid.
+(function () {
+  document.querySelectorAll('table[data-cols]').forEach(table => {
+    const key = 'azziCols:' + table.dataset.cols;
+    const tpl = document.getElementById(table.dataset.tpl || 'rowTpl');  // the template new rows are made from
+    const rows = () => [...table.rows, ...(tpl ? [...tpl.content.querySelectorAll('tr')] : [])];
+    const initial = [...table.tHead.rows[0].cells].map(c => c.dataset.col).filter(Boolean);
+    function apply(order) {
+      rows().forEach(tr => {
+        const cells = [...tr.children], fixed = cells.filter(c => !c.dataset.col);
+        const moving = cells.filter(c => c.dataset.col).sort((a, b) => order.indexOf(a.dataset.col) - order.indexOf(b.dataset.col));
+        if (moving.length) tr.append(...fixed, ...moving);
+      });
+    }
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(key)); } catch (e) {}
+    // keep only known columns; columns added later go to the end
+    let order = Array.isArray(saved) ? saved.filter(c => initial.includes(c)) : [];
+    order = order.concat(initial.filter(c => !order.includes(c)));
+    apply(order);
+
+    let dragged = null;
+    [...table.tHead.rows[0].cells].filter(th => th.dataset.col).forEach(th => {
+      th.draggable = true;
+      th.title = 'Drag to move this column';
+      th.addEventListener('dragstart', e => { dragged = th.dataset.col; th.classList.add('col-drag'); e.dataTransfer.effectAllowed = 'move'; });
+      th.addEventListener('dragend', () => {
+        dragged = null;
+        table.tHead.querySelectorAll('th').forEach(x => x.classList.remove('col-drag', 'col-drop-l', 'col-drop-r'));
+      });
+      th.addEventListener('dragover', e => {
+        if (!dragged || dragged === th.dataset.col) return;
+        e.preventDefault();
+        const right = e.offsetX > th.offsetWidth / 2;
+        th.classList.toggle('col-drop-r', right); th.classList.toggle('col-drop-l', !right);
+      });
+      th.addEventListener('dragleave', () => th.classList.remove('col-drop-l', 'col-drop-r'));
+      th.addEventListener('drop', e => {
+        e.preventDefault();
+        if (!dragged || dragged === th.dataset.col) return;
+        const right = e.offsetX > th.offsetWidth / 2;
+        order = order.filter(c => c !== dragged);
+        order.splice(order.indexOf(th.dataset.col) + (right ? 1 : 0), 0, dragged);
+        apply(order);
+        try { localStorage.setItem(key, JSON.stringify(order)); } catch (e) {}
+      });
+    });
+    // column widths: drag the right edge of a heading. Widths are kept as shares of the grid, so the grid always fills
+    // the screen width and keeps its proportions at any screen size; they are remembered per grid like the order.
+    const wkey = 'azziColW:' + table.dataset.cols;
+    const heads = () => [...table.tHead.rows[0].cells];
+    const colKey = th => th.dataset.col || '_sel';
+    let widths = {};  // column key -> share (scaled to 100% of the grid)
+    try { widths = JSON.parse(localStorage.getItem(wkey)) || {}; } catch (e) {}
+    function layout() {
+      if (!Object.keys(widths).length) return;  // the natural layout already fills the width
+      const vals = heads().map(th => widths[colKey(th)]), known = vals.filter(Boolean);
+      const avg = known.reduce((t, x) => t + x, 0) / (known.length || 1) || 100;  // a column added later gets an average share
+      const shares = vals.map(v => v || avg), total = shares.reduce((t, x) => t + x, 0);
+      table.classList.add('cols-fixed');
+      table.style.width = '100%';
+      heads().forEach((th, i) => th.style.width = (shares[i] / total * 100).toFixed(3) + '%');
+    }
+    layout();
+    heads().filter(th => th.dataset.col).forEach(th => {
+      const grip = Object.assign(document.createElement('span'), {className: 'col-resize', title: 'Drag to make this column wider or narrower'});
+      th.appendChild(grip);
+      grip.addEventListener('mousedown', e => {
+        e.preventDefault(); e.stopPropagation();
+        // while dragging, fix every column in pixels so only this one moves
+        const px = heads().map(h => h.offsetWidth);
+        heads().forEach((h, i) => h.style.width = px[i] + 'px');
+        table.classList.add('cols-fixed');
+        const others = px.reduce((t, x) => t + x, 0) - th.offsetWidth;
+        table.style.width = (others + th.offsetWidth) + 'px';
+        th.draggable = false;
+        const x0 = e.clientX, w0 = th.offsetWidth;
+        document.body.classList.add('col-resizing');
+        const move = ev => {
+          const w = Math.max(36, w0 + ev.clientX - x0);
+          th.style.width = w + 'px';
+          table.style.width = (others + w) + 'px';
+        };
+        const up = () => {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+          document.body.classList.remove('col-resizing');
+          th.draggable = true;
+          widths = {};
+          heads().forEach(h => widths[colKey(h)] = Math.round(parseFloat(h.style.width)));
+          try { localStorage.setItem(wkey, JSON.stringify(widths)); } catch (e) {}
+          layout();  // back to shares of the full width
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+      });
+      grip.addEventListener('click', e => e.stopPropagation());
+    });
+    document.querySelectorAll(`[data-cols-reset="${table.dataset.cols}"]`).forEach(b => b.addEventListener('click', () => {
+      order = initial.slice();
+      apply(order);
+      widths = {};
+      table.classList.remove('cols-fixed');
+      table.style.width = '';
+      heads().forEach(th => th.style.width = '');
+      try { localStorage.removeItem(key); localStorage.removeItem(wkey); } catch (e) {}
+    }));
+  });
+})();
+</script>
+<script>
+// Spreadsheet-style line grid (table.sheet): Excel-like keys: Enter / ↑ / ↓ move between rows, ← / → move between
+// cells at the edge of the text. Rows are added only with the grid's "Add line" button.
+document.querySelectorAll('table.sheet').forEach(t => {
+  const body = t.tBodies[0];
+  const field = cell => cell && cell.querySelector('input:not([type=hidden]), select, textarea');
+  function go(tr, idx) {
+    const f = tr && field(tr.cells[idx]);
+    if (!f) return false;
+    f.focus();
+    if (f.select && f.tagName === 'INPUT') f.select();
+    return true;
+  }
+  body.addEventListener('keydown', e => {
+    const el = e.target;
+    if (e.defaultPrevented || !el.matches('input, select') || e.altKey || e.ctrlKey) return;  // product suggestions use these keys first
+    const td = el.closest('td'), tr = td.parentElement, col = [...tr.cells].indexOf(td);
+    // number boxes don't report the caret, so ← / → always move out of them
+    const atStart = () => el.selectionStart == null || (el.selectionStart === 0 && el.selectionEnd === 0);
+    const atEnd = () => el.selectionEnd == null || el.selectionEnd === el.value.length;
+    if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'ArrowDown') {
+      e.preventDefault();  // Enter must not submit the form from the grid
+      go(tr.nextElementSibling, col);
+    } else if (e.key === 'ArrowUp' || (e.key === 'Enter' && e.shiftKey)) {
+      e.preventDefault(); go(tr.previousElementSibling, col);
+    } else if (e.key === 'ArrowLeft' && (el.tagName === 'SELECT' || atStart())) {
+      for (let c = col - 1; c >= 0; c--) if (go(tr, c)) { e.preventDefault(); break; }
+    } else if (e.key === 'ArrowRight' && (el.tagName === 'SELECT' || atEnd())) {
+      for (let c = col + 1; c < tr.cells.length; c++) if (go(tr, c)) { e.preventDefault(); break; }
+    }
+  });
+});
+</script>
+<script>
+// "+ Add new payment term..." in a payment terms dropdown: ask for it, save it to the master, select it
+document.addEventListener('focusin', e => {
+  if (e.target.tagName === 'SELECT') e.target.dataset.prev = e.target.value;
+});
+document.addEventListener('change', async e => {
+  const sel = e.target;
+  if (sel.tagName !== 'SELECT' || sel.value !== '__add__') return;
+  const back = () => { sel.value = sel.dataset.prev && sel.dataset.prev !== '__add__' ? sel.dataset.prev : ''; };
+  const name = (prompt('New payment term name (e.g. 30 Days PDC):') || '').trim();
+  if (!name) return back();
+  const days = prompt(`Credit days for "${name}" (0 for Cash / CDC):`, (name.match(/\d+/) || ['0'])[0]);
+  if (days === null || !(+days >= 0)) return back();
+  const r = await fetch('{{ url_for("api_payment_term_add") }}', {method: 'POST', body: new URLSearchParams({name, days})});
+  const t = await r.json();
+  if (!r.ok) { alert(t.error || 'Could not add the payment term.'); return back(); }
+  // add it to every payment terms dropdown on the page and pick it in this one
+  document.querySelectorAll('select option[value="__add__"]').forEach(add => {
+    const s = add.parentElement;
+    if (![...s.options].some(o => o.value === t.name)) s.insertBefore(new Option(t.name, t.name), add);
+  });
+  sel.value = t.name; sel.dataset.prev = t.name;
+  sel.dispatchEvent(new Event('input', {bubbles: true}));
+});
+</script>
+{% endif %}
+</body>
+</html>

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ DOC_TYPES[dtype] ~ 's' if dtype else 'All Documents' }}</h2>
+<form class="filters" method="get">
+  <select name="type">
+    <option value="">All types</option>
+    {% for k, v in DOC_TYPES.items() %}<option value="{{ k }}" {{ 'selected' if dtype == k }}>{{ v }}</option>{% endfor %}
+  </select>
+  <select name="status">
+    <option value="">Any status</option>
+    {% for st in ['Draft', 'Submitted'] %}<option {{ 'selected' if status == st }}>{{ st }}</option>{% endfor %}
+  </select>
+  <input name="q" value="{{ q }}" placeholder="Search no., customer, LPO">
+  <button class="btn">Search</button>
+  <span class="spacer"></span>
+  {% if dtype in PURCHASE_FLOW %}{% if url_ok(url_for('documents', type='PO', new=1)) %}<a class="btn primary" href="{{ url_for('documents', type='PO', new=1) }}">Create PO</a>{% endif %}
+  {% elif url_ok(url_for('documents', type='SO', new=1)) %}<a class="btn primary" href="{{ url_for('documents', type='SO', new=1) }}">Create SO</a>{% endif %}
+</form>
+{% include "_doc_table.html" with context %}
+{% include "_pager.html" %}
+{% endblock %}

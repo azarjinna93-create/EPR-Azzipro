@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Azzi Soft{% endblock %}
+{% macro icon(name) -%}
+<svg viewBox="0 0 24 24" aria-hidden="true">{{ {
+  'doc': '<path d="M6 2h8l6 6v14H6z" fill="currentColor" opacity=".9"/><path d="M14 2v6h6" fill="#fff" opacity=".55"/>',
+  'cart': '<path d="M3 4h2l2.4 10.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 8H6.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="20" r="1.6" fill="currentColor"/><circle cx="17" cy="20" r="1.6" fill="currentColor"/>',
+  'check': '<circle cx="12" cy="12" r="10" fill="currentColor"/><path d="m7.5 12.5 3 3 6-6.5" fill="none" stroke="#fff" stroke-width="2.4"/>',
+  'x': '<circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="m8.5 8.5 7 7m0-7-7 7" stroke="currentColor" stroke-width="2.2"/>',
+  'bell': '<path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2"/>',
+  'search': '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2"/>',
+  'bolt': '<path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
+  'pie': '<path d="M12 3a9 9 0 1 0 9 9h-9z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z" fill="currentColor"/>',
+  'list': '<rect x="4" y="3" width="16" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2"/>',
+}[name]|safe }}</svg>
+{%- endmacro %}
+{% block content %}
+{% set first = (current_user.full_name or current_user.username).split()[0] %}
+{% set n_wait = waiting|selectattr('mine')|list|length %}
+<div class="dash" data-no-back>
+
+  <!-- top bar: search, notifications, user -->
+  <div class="dash-top">
+    <form class="dash-search" action="{{ url_for('documents') }}" method="get" role="search">
+      {{ icon('search') }}<input name="q" placeholder="Search documents: PO, invoice, vendor, customer, reference…" aria-label="Search documents">
+    </form>
+    <a class="dash-bell" href="{{ url_for('po_approvals') }}" title="{{ n_wait }} waiting for your approval">{{ icon('bell') }}
+      {% if n_wait %}<span class="badge">{{ n_wait }}</span>{% endif %}</a>
+    <a class="dash-user" href="{{ url_for('profile') }}">
+      <span class="avatar">{{ first[:1]|upper }}</span>
+      <span><b>{{ current_user.full_name or current_user.username }}</b><small>{{ 'Administrator' if current_user.role == 'admin' else 'User' }}</small></span>
+    </a>
+  </div>
+
+  <!-- welcome + clock -->
+  <div class="dash-hello">
+    <div>
+      <h1>Welcome, {{ first }}!</h1>
+      <p>Here's what's happening with {{ S.company_name or 'your business' }} today.</p>
+    </div>
+    <div class="dash-clock">
+      <span id="dashDate"></span>
+      <b id="dashTime"></b>
+    </div>
+  </div>
+
+  <div class="dash-kpis">
+    <a href="{{ url_for('documents', type='INV') }}"><small>Sales this month</small><b>{{ S.currency }} {{ stats.sales_month|money }}</b></a>
+    <a href="{{ url_for('documents', type='PI') }}"><small>Purchases this month</small><b>{{ S.currency }} {{ stats.purchases_month|money }}</b></a>
+    <a href="{{ url_for('accounts', kind='customer') }}"><small>Receivable</small><b>{{ S.currency }} {{ stats.receivable|money }}</b></a>
+    <a href="{{ url_for('accounts', kind='supplier') }}"><small>Payable</small><b>{{ S.currency }} {{ stats.payable|money }}</b></a>
+    <a href="{{ url_for('inventory') }}"><small>Stock value</small><b>{{ S.currency }} {{ stats.stock_value|money }}</b></a>
+    <a href="{{ url_for('documents', status='Draft') }}"><small>Drafts not submitted</small><b>{{ stats.drafts }}</b></a>
+  </div>
+
+  <div class="dash-grid">
+    <!-- pending approvals -->
+    <section class="dpanel dash-wait">
+      <header><h2>{{ icon('list') }} Pending Approvals</h2><a href="{{ url_for('po_approvals', tab='all') }}">View All</a></header>
+      <div class="dtable-wrap">
+      <table class="dtable">
+        <thead><tr><th>#</th><th>Document</th><th>Type</th><th>Vendor / Customer</th><th>Submitted By</th><th>Date</th>
+          <th class="r">Amount</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for w in waiting[:6] %}
+          <tr>
+            <td>{{ loop.index }}</td><td><b>{{ w.no }}</b></td><td>{{ w.kind }}</td><td>{{ w.party }}</td><td>{{ w.by }}</td>
+            <td class="nowrap">{{ w.date|ddmmyyyy }}</td><td class="r nowrap">{{ w.amount }}</td>
+            <td><span class="pill">{{ w.status }}</span></td>
+            <td><a class="dbtn {{ '' if w.mine else 'ghost' }}" href="{{ w.url }}">{{ 'Review' if w.mine else 'View' }}</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="dempty">🎉 Nothing is waiting for approval.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <!-- quick actions -->
+    <section class="dpanel dash-quick">
+      <header><h2>{{ icon('bolt') }} Quick Actions</h2></header>
+      <div class="qa">
+        {% if url_ok(url_for('documents', type='PO', new=1)) %}<a class="q blue" href="{{ url_for('documents', type='PO', new=1) }}">🛒<span>New Purchase Order</span></a>{% endif %}
+        {% if url_ok(url_for('documents', type='SO', new=1)) %}<a class="q green" href="{{ url_for('documents', type='SO', new=1) }}">🧾<span>New Sales Order</span></a>{% endif %}
+        {% if url_ok(url_for('payment_new', kind='receipt')) %}<a class="q purple" href="{{ url_for('payment_new', kind='receipt') }}">💳<span>Receive Payment</span></a>{% endif %}
+        {% if url_ok(url_for('inventory')) %}<a class="q amber" href="{{ url_for('inventory') }}">📦<span>Stock Summary</span></a>{% endif %}
+        {% if url_ok(url_for('po_approvals')) %}<a class="q red" href="{{ url_for('po_approvals') }}">✅<span>Approvals</span></a>{% endif %}
+        {% if url_ok(url_for('suppliers')) %}<a class="q teal" href="{{ url_for('suppliers') }}">🏢<span>Vendors</span></a>{% endif %}
+      </div>
+    </section>
+
+    <!-- calendar + schedule -->
+    <section class="dpanel dash-cal">
+      <header class="cal-head">
+        <button type="button" id="calPrev" aria-label="Previous month">‹</button>
+        <h2 id="calTitle"></h2>
+        <button type="button" id="calNext" aria-label="Next month">›</button>
+      </header>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-legend"><span class="dot receipt"></span>Receipt due <span class="dot late"></span>Overdue
+        <span class="dot sale"></span>Sales invoice <span class="dot purchase"></span>Purchase invoice</div>
+      <div class="sched">
+        <header><h3 id="schedTitle">Today's Schedule</h3><a href="{{ url_for('documents', type='PO') }}">View All</a></header>
+        <ul id="schedList"></ul>
+      </div>
+    </section>
+
+    <div class="dash-pair">
+    <!-- notifications -->
+    <section class="dpanel dash-notes">
+      <header><h2>{{ icon('bell') }} Recent Notifications</h2>
+        <a href="{{ url_for('admin_logs') if current_user.role == 'admin' else url_for('billing_log') }}">View All</a></header>
+      <ul class="notes">
+        {% for a in activity %}
+        <li><span class="dot {{ 'red' if 'REJECT' in a.action or 'DELETE' in a.action else 'green' if 'APPROVE' in a.action or 'SUBMIT' in a.action
+                               else 'amber' if 'EDIT' in a.action else 'blue' }}"></span>
+          <span class="nt">{{ a.text }}{% if current_user.role == 'admin' and a.who %} <small>· {{ a.who }}</small>{% endif %}</span>
+          <small class="ago">{{ a.ago }}</small></li>
+        {% else %}
+        <li class="dempty">No activity yet.</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <!-- PO status donut -->
+    <section class="dpanel dash-donut">
+      {% set total_po = po_mix.values()|sum %}
+      {% set colors = {'Invoiced': '#1e8e3e', 'Received': '#34a853', 'Partly received': '#4285f4', 'Open order': '#fbbc04', 'Pending approval': '#ea4335'} %}
+      {% set done = po_mix['Invoiced'] + po_mix['Received'] %}
+      <header><h2>{{ icon('pie') }} Purchase Order Status <small>(This Month)</small></h2></header>
+      {% if total_po %}
+      {% set ns = namespace(acc=0, stops=[]) %}
+      {% for k, v in po_mix.items() if v %}
+        {% set start = ns.acc %}{% set ns.acc = ns.acc + v / total_po * 100 %}
+        {% set ns.stops = ns.stops + [colors[k] ~ ' ' ~ '%.2f'|format(start) ~ '% ' ~ '%.2f'|format(ns.acc) ~ '%'] %}
+      {% endfor %}
+      <div class="donut-wrap">
+        <div class="donut" style="background: conic-gradient({{ ns.stops|join(', ') }})"><span><b>{{ (done / total_po * 100)|round|int }}%</b><small>received</small></span></div>
+        <ul class="donut-legend">
+          {% for k, v in po_mix.items() %}
+          <li><span class="dot" style="background:{{ colors[k] }}"></span>{{ k }}<b>{{ (v / total_po * 100)|round|int }}%</b><small>{{ v }}</small></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% else %}
+      <p class="dempty">No purchase orders this month yet.</p>
+      {% endif %}
+    </section>
+
+    </div>
+
+  </div>
+
+  {% if stats.my_approved %}
+  <div class="flash ok">✓ {{ stats.my_approved }} of your Credit / Debit Note requests {{ 'are' if stats.my_approved > 1 else 'is' }} approved —
+    <a href="{{ url_for('my_requests') }}">post {{ 'them' if stats.my_approved > 1 else 'it' }} now</a></div>
+  {% endif %}
+
+  <section class="dpanel">
+    <header><h2>{{ icon('doc') }} Recent Documents</h2><a href="{{ url_for('documents') }}">View All</a></header>
+    {% include "_doc_table.html" with context %}
+  </section>
+
+  <footer class="dash-foot">© {{ today[:4] }} {{ S.company_name or 'Azzi Soft' }}. All rights reserved.</footer>
+</div>
+
+<script>
+(function () {
+  // live date and time
+  const fmtD = new Intl.DateTimeFormat('en-GB', {weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'});
+  const fmtT = new Intl.DateTimeFormat('en-US', {hour: '2-digit', minute: '2-digit'});
+  function tick() {
+    const n = new Date();
+    document.getElementById('dashDate').textContent = fmtD.format(n);
+    document.getElementById('dashTime').textContent = fmtT.format(n);
+  }
+  tick(); setInterval(tick, 15000);
+
+  // calendar with the day's receipts and invoices
+  const EVENTS = {{ events|tojson }};
+  const TODAY = '{{ today }}';
+  const byDay = {};
+  EVENTS.forEach(e => (byDay[e.date] = byDay[e.date] || []).push(e));
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  let view = new Date(TODAY + 'T00:00'); view.setDate(1);
+  let picked = TODAY;
+
+  function render() {
+    document.getElementById('calTitle').textContent = view.toLocaleDateString('en-GB', {month: 'long', year: 'numeric'});
+    const grid = document.getElementById('calGrid');
+    grid.replaceChildren(...['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => Object.assign(document.createElement('span'), {className: 'dow', textContent: d})));
+    const start = new Date(view); start.setDate(1 - view.getDay());
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const key = iso(d), ev = byDay[key] || [];
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'day' + (d.getMonth() !== view.getMonth() ? ' out' : '') + (key === TODAY ? ' today' : '') + (key === picked ? ' picked' : '');
+      b.innerHTML = `<span>${d.getDate()}</span><i></i>`;
+      const kinds = [...new Set(ev.map(e => e.late ? 'late' : e.kind))].slice(0, 3);
+      b.querySelector('i').innerHTML = kinds.map(k => `<em class="dot ${k}"></em>`).join('');
+      if (ev.length) b.title = ev.length + ' item' + (ev.length > 1 ? 's' : '');
+      b.onclick = () => { picked = key; render(); };
+      grid.appendChild(b);
+    }
+    schedule();
+  }
+  function schedule() {
+    const d = new Date(picked + 'T00:00');
+    document.getElementById('schedTitle').textContent =
+      picked === TODAY ? "Today's Schedule" : d.toLocaleDateString('en-GB', {weekday: 'long', day: 'numeric', month: 'short'});
+    const ul = document.getElementById('schedList');
+    const ev = byDay[picked] || [];
+    ul.replaceChildren(...(ev.length ? ev.map(e => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="dot ${e.late ? 'late' : e.kind}"></span><a></a><small></small>`;
+      li.querySelector('a').href = e.url;
+      li.querySelector('a').textContent = e.text + (e.late ? ' (overdue)' : '');
+      li.querySelector('small').textContent = e.sub;
+      return li;
+    }) : [Object.assign(document.createElement('li'), {className: 'dempty', textContent: 'Nothing scheduled.'})]));
+  }
+  document.getElementById('calPrev').onclick = () => { view.setMonth(view.getMonth() - 1); render(); };
+  document.getElementById('calNext').onclick = () => { view.setMonth(view.getMonth() + 1); render(); };
+  render();
+})();
+</script>
+{% endblock %}
